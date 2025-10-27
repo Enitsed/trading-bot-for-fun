@@ -22,4 +22,11 @@ export const CFG = {
   cooldownMin: Number(process.env.COOLDOWN_MIN || '10'), // 쿨다운 시간(분)
   dryRun: (process.env.DRY_RUN || 'false').toLowerCase() === 'true', // 주문 미체결 시뮬레이션 모드
   logLevel: process.env.LOG_LEVEL || 'info', // 로그 레벨
+  pgEnable: (process.env.PG_ENABLE || 'false').toLowerCase() === 'true', // Postgres 기록 활성화 여부
+  pgUrl: process.env.PG_URL || '', // Postgres 연결 문자열
+  pgHost: process.env.PG_HOST || '127.0.0.1', // Postgres 호스트
+  pgPort: Number(process.env.PG_PORT || '5432'), // Postgres 포트
+  pgUser: process.env.PG_USER || 'postgres', // Postgres 사용자
+  pgPassword: process.env.PG_PASSWORD || '', // Postgres 비밀번호
+  pgDatabase: process.env.PG_DATABASE || 'scalper', // Postgres 데이터베이스
 } as const;

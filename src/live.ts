@@ -5,6 +5,7 @@ import { connect, fetchOHLCV, getPositionQty, placeMarket, quotePrecision, toAmo
 import { rsiReversionSignals, type Candle, type Signal } from './strategy.js';
 import { sizeByRisk, computeBracket, hitBracket, withinCooldown } from './risk.js';
 import { CFG } from './config.js';
+import { prepareStorage, recordPriceTick, recordTrade } from './storage.js';
 
 type BalanceSnapshot = {
   quoteFree: number;
@@ -67,6 +68,30 @@ const DEFAULT_RUNTIME_CFG: RuntimeCfg = {
   takePct: CFG.takePct,
   cooldownMin: CFG.cooldownMin,
 };
+
+type OrderResult = Awaited<ReturnType<typeof placeMarket>>;
+
+type OrderDetails = {
+  orderId: string | null;
+  clientOrderId: string | null;
+  info?: Record<string, unknown>;
+};
+
+function extractOrderDetails(order: OrderResult | null | undefined): OrderDetails {
+  if (!order || typeof order !== 'object') {
+    return { orderId: null, clientOrderId: null };
+  }
+  const orderId = 'id' in order && typeof order.id === 'string' && order.id.length > 0 ? order.id : null;
+  const clientOrderId =
+    'clientOrderId' in order && typeof order.clientOrderId === 'string' && order.clientOrderId.length > 0
+      ? order.clientOrderId
+      : null;
+  const info =
+    'info' in order && order.info && typeof order.info === 'object'
+      ? (order.info as Record<string, unknown>)
+      : undefined;
+  return info ? { orderId, clientOrderId, info } : { orderId, clientOrderId };
+}
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
   try {
@@ -148,7 +173,7 @@ async function handleCommand(
   lastTradeTs: number | null;
   event: string;
 }> {
-  const { exchange, price, tradableThreshold, notionalMin, runtimeCfg } = ctx;
+  const { exchange, price, tradableThreshold, notionalMin, runtimeCfg, thresholds } = ctx;
   let { position, entryPrice, openBracket, equity, balances, mark, lastTradeTs } = ctx;
   let event = `command:${command.type}`;
 
@@ -168,12 +193,39 @@ async function handleCommand(
     }
     const notional = amount * price;
     if (amount >= tradableThreshold && notional >= notionalMin) {
-      await placeMarket(exchange, 'buy', amount);
+      const order = await placeMarket(exchange, 'buy', amount);
+      const executedAt = Date.now();
       entryPrice = price;
       openBracket = computeBracket(entryPrice, { stopPct: runtimeCfg.stopPct, takePct: runtimeCfg.takePct });
-      lastTradeTs = Date.now();
+      lastTradeTs = executedAt;
       event = `manual-buy:${amount}`;
       await refreshState();
+      const details = extractOrderDetails(order);
+      const metadata: Record<string, unknown> = {
+        source: 'command',
+        commandId: command.id,
+        commandType: command.type,
+        notional,
+        bracket: openBracket,
+        runtimeCfg: { ...runtimeCfg },
+        thresholds: { ...thresholds },
+      };
+      if (details.info) {
+        metadata.orderInfo = details.info;
+      }
+      await recordTrade({
+        symbol: CFG.symbol,
+        ts: executedAt,
+        side: 'buy',
+        amount,
+        price,
+        event,
+        position,
+        equity,
+        orderId: details.orderId,
+        clientOrderId: details.clientOrderId,
+        metadata,
+      });
     } else {
       event = 'manual-buy-skip';
     }
@@ -192,14 +244,42 @@ async function handleCommand(
       amount = Math.max(toAmountPrecision(exchange, amount), 0);
       const notional = amount * price;
       if (amount > 0 && notional >= notionalMin) {
-        await placeMarket(exchange, 'sell', amount);
-        lastTradeTs = Date.now();
+        const preTradePosition = position;
+        const order = await placeMarket(exchange, 'sell', amount);
+        const executedAt = Date.now();
+        lastTradeTs = executedAt;
         if (amount >= position) {
           entryPrice = 0;
           openBracket = null;
         }
         event = `manual-sell:${amount}`;
         await refreshState();
+        const details = extractOrderDetails(order);
+        const metadata: Record<string, unknown> = {
+          source: 'command',
+          commandId: command.id,
+          commandType: command.type,
+          notional,
+          preTradePosition,
+          runtimeCfg: { ...runtimeCfg },
+          thresholds: { ...thresholds },
+        };
+        if (details.info) {
+          metadata.orderInfo = details.info;
+        }
+        await recordTrade({
+          symbol: CFG.symbol,
+          ts: executedAt,
+          side: 'sell',
+          amount,
+          price,
+          event,
+          position,
+          equity,
+          orderId: details.orderId,
+          clientOrderId: details.clientOrderId,
+          metadata,
+        });
       } else {
         event = 'manual-sell-skip:size';
       }
@@ -217,12 +297,40 @@ async function handleCommand(
       amount = Math.max(toAmountPrecision(exchange, amount), 0);
       const notional = amount * price;
       if (amount > 0 && notional >= notionalMin) {
-        await placeMarket(exchange, 'sell', amount);
-        lastTradeTs = Date.now();
+        const preTradePosition = position;
+        const order = await placeMarket(exchange, 'sell', amount);
+        const executedAt = Date.now();
+        lastTradeTs = executedAt;
         entryPrice = 0;
         openBracket = null;
         event = 'flatten';
         await refreshState();
+        const details = extractOrderDetails(order);
+        const metadata: Record<string, unknown> = {
+          source: 'command',
+          commandId: command.id,
+          commandType: command.type,
+          notional,
+          preTradePosition,
+          runtimeCfg: { ...runtimeCfg },
+          thresholds: { ...thresholds },
+        };
+        if (details.info) {
+          metadata.orderInfo = details.info;
+        }
+        await recordTrade({
+          symbol: CFG.symbol,
+          ts: executedAt,
+          side: 'sell',
+          amount,
+          price,
+          event,
+          position,
+          equity,
+          orderId: details.orderId,
+          clientOrderId: details.clientOrderId,
+          metadata,
+        });
       } else {
         event = 'flatten-skip:size';
       }
@@ -247,6 +355,8 @@ async function publishSnapshot(data: {
   lastTradeTs: number | null;
   event: string;
   runtimeCfg: RuntimeCfg;
+  candleTs?: number;
+  candle?: Candle | null;
 }) {
   const snapshot: Snapshot = {
     timestamp: Date.now(),
@@ -266,6 +376,28 @@ async function publishSnapshot(data: {
     runtimeCfg: data.runtimeCfg,
   };
   await writeSnapshot(snapshot);
+  const candle = data.candle ?? null;
+  const candleTs =
+    typeof data.candleTs === 'number'
+      ? data.candleTs
+      : typeof candle?.ts === 'number'
+        ? candle.ts
+        : snapshot.timestamp;
+  await recordPriceTick({
+    symbol: CFG.symbol,
+    candleTs,
+    open: typeof candle?.open === 'number' ? candle.open : data.price,
+    high: typeof candle?.high === 'number' ? candle.high : data.price,
+    low: typeof candle?.low === 'number' ? candle.low : data.price,
+    close: typeof candle?.close === 'number' ? candle.close : data.price,
+    volume: typeof candle?.vol === 'number' ? candle.vol : 0,
+    signal: data.signal,
+    position: data.position,
+    equity: data.equity,
+    event: data.event,
+    runtimeCfg: { ...data.runtimeCfg },
+    recordedAt: snapshot.timestamp,
+  });
 }
 
 let lastTradeTs: number | null = null; // 마지막 체결 시각(ms)
@@ -274,6 +406,7 @@ let entryPrice = 0; // 현재 포지션 진입가
 
 async function loop() {
   console.log('Loading exchange...');
+  await prepareStorage();
   const exchange = await connect(); // ccxt 거래소 인스턴스
   console.log('Exchange loaded.');
 
@@ -298,7 +431,12 @@ async function loop() {
         close: Number(row[4]),
         vol: Number(row[5]),
       }));
-      const latestTs = candles.at(-1)?.ts ?? 0; // 가장 최근 캔들 시간
+      const latestCandle = candles.at(-1) ?? null;
+      if (!latestCandle) {
+        await sleep(30_000);
+        continue;
+      }
+      const latestTs = latestCandle.ts; // 가장 최근 캔들 시간
       if (latestTs === lastBarTs) {
         await sleep(30_000);
         continue;
@@ -314,8 +452,8 @@ async function loop() {
         exit: runtimeCfg.rsiExit,
       });
       console.log(signals.slice(-10).reverse());
-      const signal = signals.at(-1)!; // 최신 캔들에 대한 시그널
-      const price = candles.at(-1)!.close; // 현재 종가
+      const signal = signals.at(-1) ?? 'HOLD'; // 최신 캔들에 대한 시그널
+      const price = latestCandle.close; // 현재 종가
       let position = await getPositionQty(exchange); // 보유 수량
       const thresholdRaw = Math.max(baseMin, notionalMin > 0 ? notionalMin / price : 0);
       const tradableThreshold =
@@ -361,6 +499,8 @@ async function loop() {
             lastTradeTs,
             event: result.event,
             runtimeCfg,
+            candleTs: latestTs,
+            candle: latestCandle,
           });
         }
       }
@@ -388,6 +528,8 @@ async function loop() {
           lastTradeTs,
           event,
           runtimeCfg,
+          candleTs: latestTs,
+          candle: latestCandle,
         });
         await sleep(60_000);
         continue;
@@ -405,14 +547,42 @@ async function loop() {
           amount = Math.max(toAmountPrecision(exchange, amount), 0);
           const notional = amount * price;
           if (amount >= tradableThreshold && notional >= notionalMin) {
-            await placeMarket(exchange, 'sell', amount);
+            const previousBracket = openBracket;
+            const order = await placeMarket(exchange, 'sell', amount);
+            const executedAt = Date.now();
             openBracket = null;
             entryPrice = 0;
-            lastTradeTs = Date.now();
+            lastTradeTs = executedAt;
             console.log(`[${hit}] exit @ ~${price}`);
             ({ equity, balances, mark } = await equityQuote(exchange));
             position = await getPositionQty(exchange);
             event = hit === 'STOP' ? 'bracket-stop' : 'bracket-take';
+            const details = extractOrderDetails(order);
+            const metadata: Record<string, unknown> = {
+              source: 'bracket',
+              reason: hit,
+              notional,
+              previousBracket,
+              amount,
+              runtimeCfg: { ...runtimeCfg },
+              thresholds: { ...thresholds },
+            };
+            if (details.info) {
+              metadata.orderInfo = details.info;
+            }
+            await recordTrade({
+              symbol: CFG.symbol,
+              ts: executedAt,
+              side: 'sell',
+              amount,
+              price,
+              event,
+              position,
+              equity,
+              orderId: details.orderId,
+              clientOrderId: details.clientOrderId,
+              metadata,
+            });
             await publishSnapshot({
               price,
               signal,
@@ -428,6 +598,8 @@ async function loop() {
               lastTradeTs,
               event,
               runtimeCfg,
+              candleTs: latestTs,
+              candle: latestCandle,
             });
             await sleep(5_000);
             continue;
@@ -451,6 +623,8 @@ async function loop() {
             lastTradeTs,
             event,
             runtimeCfg,
+            candleTs: latestTs,
+            candle: latestCandle,
           });
           await sleep(5_000);
           continue;
@@ -495,17 +669,43 @@ async function loop() {
           `buying amount : ${amount}, price : ${price}, eqQuote : ${eqQuote}, rawQty : ${rawQty}, baseMin : ${baseMin}, minNotional : ${notionalMin}, notional : ${notional}`
         );
         if (amount >= tradableThreshold && notional >= notionalMin) {
-          await placeMarket(exchange, 'buy', amount);
+          const order = await placeMarket(exchange, 'buy', amount);
+          const executedAt = Date.now();
           entryPrice = price;
           openBracket = computeBracket(entryPrice, {
             stopPct: runtimeCfg.stopPct,
             takePct: runtimeCfg.takePct,
           });
-          lastTradeTs = Date.now();
+          lastTradeTs = executedAt;
           console.log(`BUY ${amount} @ ~${price} bracket=${JSON.stringify(openBracket)}`);
           ({ equity, balances, mark } = await equityQuote(exchange));
           position = await getPositionQty(exchange);
           event = 'buy';
+          const details = extractOrderDetails(order);
+          const metadata: Record<string, unknown> = {
+            source: 'signal',
+            signal,
+            notional,
+            runtimeCfg: { ...runtimeCfg },
+            amountRequested: rawQty,
+            thresholds: { ...thresholds },
+          };
+          if (details.info) {
+            metadata.orderInfo = details.info;
+          }
+          await recordTrade({
+            symbol: CFG.symbol,
+            ts: executedAt,
+            side: 'buy',
+            amount,
+            price,
+            event,
+            position,
+            equity,
+            orderId: details.orderId,
+            clientOrderId: details.clientOrderId,
+            metadata,
+          });
           await publishSnapshot({
             price,
             signal,
@@ -521,6 +721,8 @@ async function loop() {
             lastTradeTs,
             event,
             runtimeCfg,
+            candleTs: latestTs,
+            candle: latestCandle,
           });
         } else {
           console.log(
@@ -542,6 +744,8 @@ async function loop() {
             lastTradeTs,
             event,
             runtimeCfg,
+            candleTs: latestTs,
+            candle: latestCandle,
           });
         }
       } else if (signal === 'EXIT' && position > 0) {
@@ -554,14 +758,39 @@ async function loop() {
         amount = Math.max(toAmountPrecision(exchange, amount), 0);
         const notional = amount * price;
         if (amount >= tradableThreshold && notional >= notionalMin) {
-          await placeMarket(exchange, 'sell', amount);
+          const order = await placeMarket(exchange, 'sell', amount);
+          const executedAt = Date.now();
           openBracket = null;
           entryPrice = 0;
-          lastTradeTs = Date.now();
+          lastTradeTs = executedAt;
           console.log(`EXIT @ ~${price}`);
           ({ equity, balances, mark } = await equityQuote(exchange));
           event = 'exit';
           position = await getPositionQty(exchange);
+          const details = extractOrderDetails(order);
+          const metadata: Record<string, unknown> = {
+            source: 'signal',
+            signal,
+            notional,
+            thresholds: { ...thresholds },
+            runtimeCfg: { ...runtimeCfg },
+          };
+          if (details.info) {
+            metadata.orderInfo = details.info;
+          }
+          await recordTrade({
+            symbol: CFG.symbol,
+            ts: executedAt,
+            side: 'sell',
+            amount,
+            price,
+            event,
+            position,
+            equity,
+            orderId: details.orderId,
+            clientOrderId: details.clientOrderId,
+            metadata,
+          });
           await publishSnapshot({
             price,
             signal,
@@ -577,6 +806,8 @@ async function loop() {
             lastTradeTs,
             event,
             runtimeCfg,
+            candleTs: latestTs,
+            candle: latestCandle,
           });
         } else {
           console.log(
@@ -598,6 +829,8 @@ async function loop() {
             lastTradeTs,
             event,
             runtimeCfg,
+            candleTs: latestTs,
+            candle: latestCandle,
           });
         }
       }
@@ -618,6 +851,8 @@ async function loop() {
           lastTradeTs,
           event,
           runtimeCfg,
+          candleTs: latestTs,
+          candle: latestCandle,
         });
       }
 
@@ -641,6 +876,8 @@ async function loop() {
         lastTradeTs,
         event: `error:${message}`,
         runtimeCfg,
+        candleTs: Date.now(),
+        candle: null,
       });
       await sleep(10_000);
     }

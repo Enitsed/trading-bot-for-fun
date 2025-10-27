@@ -18,6 +18,7 @@
    - `.env.example`을 `.env`로 복사하고 거래소 API 정보를 채워 넣습니다.
    - Binance 사용자는 `EXCHANGE=binanceus`, `USE_SANDBOX=true`로 테스트넷을 사용할 수 있습니다.
    - Upbit 사용자는 `EXCHANGE=upbit`, `USE_SANDBOX=false`, `DRY_RUN=true`(Upbit에는 공식 샌드박스가 없음)로 시작하세요.
+   - 시세/체결 히스토리를 남기려면 Postgres를 준비하고 `PG_ENABLE=true`와 `PG_URL` 또는 `PG_HOST`/`PG_USER`/`PG_PASSWORD`/`PG_DATABASE` 값을 채웁니다. 봇이 기동되면 `price_ticks`, `trade_events` 테이블을 자동 생성합니다.
 3. **빌드**
    ```bash
    pnpm build
@@ -38,6 +39,11 @@
 - `pnpm dev:live` – ts-node로 실시간 봇 실행
 - `pnpm start:backtest` – 빌드된 백테스트 실행
 - `pnpm start:live` – 빌드된 실시간 봇 실행
+
+## Postgres 기록
+- 라이브 봇은 `PG_ENABLE=true`일 때 각 루프에서 최신 호가 스냅샷을 `price_ticks` 테이블에 저장하고, 마켓 주문이 체결되면 `trade_events` 테이블에 체결 메타데이터(사이드, 수량, 이벤트, 주문 ID 등)를 기록합니다.
+- 연결은 `PG_URL` 또는 `PG_HOST`/`PG_PORT`/`PG_USER`/`PG_PASSWORD`/`PG_DATABASE` 환경변수로 구성할 수 있습니다.
+- 로깅 실패는 트레이딩 루프를 중단시키지 않으며, 초기화에 실패하면 로그는 자동으로 비활성화됩니다.
 
 ## 튜닝 팁
 - 과매도 진입 기준은 `RSI_ENTRY`를 25–35, 평균회귀 청산 기준은 `RSI_EXIT`을 45–55 정도로 조정
