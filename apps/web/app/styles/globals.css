@@ -152,6 +152,53 @@ header .meta {
   color: #93c5fd;
 }
 
+.chart-panel {
+  overflow: hidden;
+}
+
+.chart-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+}
+
+.chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-line {
+  stroke: #60a5fa;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-area {
+  stroke: none;
+}
+
+.chart-axis {
+  stroke: rgba(148, 163, 230, 0.3);
+  stroke-width: 1;
+}
+
+.chart-grid {
+  stroke: rgba(148, 163, 230, 0.08);
+  stroke-width: 1;
+}
+
+.chart-label {
+  fill: #94a3e6;
+  font-size: 12px;
+}
+
+.chart-empty {
+  margin: 0;
+  color: #9aa3b5;
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;

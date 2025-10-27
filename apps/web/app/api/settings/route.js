@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const RUNTIME_DIR = path.join(process.cwd(), 'runtime');
+const ROOT_DIR = path.resolve(process.cwd(), '..');
+const RUNTIME_DIR = path.join(ROOT_DIR, 'runtime');
 const OVERRIDES_PATH = path.join(RUNTIME_DIR, 'overrides.json');
 const ALLOWED_KEYS = [
   'rsiLen',

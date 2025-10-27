@@ -26,19 +26,36 @@
 4. **백테스트 실행**
    `ts,open,high,low,close,volume`(타임스탬프는 ms) 컬럼을 가진 CSV를 준비한 뒤:
    ```bash
-   node dist/backtest.js ./data/btcusdt_5m.csv
+   node apps/bot/dist/backtest.js ./data/btcusdt_5m.csv
    ```
 5. **실거래/모의거래 실행**
    ```bash
-   node dist/live.js
+   node apps/bot/dist/live.js
    ```
 
 ## 스크립트
 
-- `pnpm dev:backtest` – ts-node로 백테스트 실행
-- `pnpm dev:live` – ts-node로 실시간 봇 실행
-- `pnpm start:backtest` – 빌드된 백테스트 실행
-- `pnpm start:live` – 빌드된 실시간 봇 실행
+- `pnpm dev:backtest` – ts-node로 백테스트 실행 (`apps/bot/src`)
+- `pnpm dev:live` – ts-node로 실시간 봇 실행 (`apps/bot/src`)
+- `pnpm start:backtest` – 빌드된 백테스트 실행 (`apps/bot/dist`)
+- `pnpm start:live` – 빌드된 실시간 봇 실행 (`apps/bot/dist`)
+- `pnpm dev:web` – Next.js 대시보드 개발 서버 (`apps/web`)
+- `pnpm build:web` / `pnpm start:web` – 빌드된 웹 대시보드 실행
+
+## 폴더 구조
+
+```
+apps/
+  bot/          # 트레이딩 봇 (TypeScript)
+    src/
+    dist/
+    tsconfig.json
+  web/          # Next.js 대시보드
+    app/
+    next.config.mjs
+    tsconfig.next.json
+runtime/        # 봇과 대시보드가 공유하는 런타임 파일 (telemetry, commands 등)
+```
 
 ## Postgres 기록
 - 라이브 봇은 `PG_ENABLE=true`일 때 각 루프에서 최신 호가 스냅샷을 `price_ticks` 테이블에 저장하고, 마켓 주문이 체결되면 `trade_events` 테이블에 체결 메타데이터(사이드, 수량, 이벤트, 주문 ID 등)를 기록합니다.

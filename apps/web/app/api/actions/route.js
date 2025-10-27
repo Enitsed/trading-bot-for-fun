@@ -3,7 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
-const RUNTIME_DIR = path.join(process.cwd(), 'runtime');
+const ROOT_DIR = path.resolve(process.cwd(), '..');
+const RUNTIME_DIR = path.join(ROOT_DIR, 'runtime');
 const COMMANDS_PATH = path.join(RUNTIME_DIR, 'commands.json');
 const ALLOWED_TYPES = new Set(['manual-buy', 'manual-sell', 'flatten']);
 

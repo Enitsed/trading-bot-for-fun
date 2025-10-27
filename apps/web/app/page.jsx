@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { HourlyChart } from './components/hourly-chart.jsx';
 
 const POLL_INTERVAL = 5000;
+const HISTORY_POLL_INTERVAL = 60000;
+const HISTORY_WINDOW_HOURS = 48;
 
 function formatNumber(value, options = {}) {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
@@ -42,6 +45,9 @@ export default function DashboardPage() {
   });
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState(null);
+  const [historyCandles, setHistoryCandles] = useState([]);
+  const [historyStatus, setHistoryStatus] = useState('loading');
+  const [historyError, setHistoryError] = useState(null);
 
   const fetchSnapshot = async () => {
     try {
@@ -67,6 +73,33 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchSnapshot();
     const id = setInterval(fetchSnapshot, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        setHistoryStatus((prev) => (prev === 'ready' ? prev : 'loading'));
+        const res = await fetch(`/api/history?hours=${HISTORY_WINDOW_HOURS}`, { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error(`요청 실패: ${res.status}`);
+        }
+        const body = await res.json();
+        if (!body?.ok) {
+          throw new Error(body?.error || '데이터를 불러오지 못했습니다.');
+        }
+        setHistoryCandles(body.candles ?? []);
+        setHistoryStatus('ready');
+        setHistoryError(null);
+      } catch (err) {
+        console.error(err);
+        setHistoryStatus('error');
+        setHistoryError(err.message);
+      }
+    };
+
+    fetchHistory();
+    const id = setInterval(fetchHistory, HISTORY_POLL_INTERVAL);
     return () => clearInterval(id);
   }, []);
 
@@ -254,6 +287,20 @@ export default function DashboardPage() {
                 </div>
               </dl>
             </div>
+          </section>
+
+          <section className="panel chart-panel">
+            <h3>시간별 가격 (최근 {HISTORY_WINDOW_HOURS}시간)</h3>
+            {historyStatus === 'loading' && <p className="note">차트를 준비하는 중입니다…</p>}
+            {historyStatus === 'error' && (
+              <p className="note status">차트를 불러오지 못했습니다: {historyError}</p>
+            )}
+            {historyStatus === 'ready' && historyCandles.length === 0 && (
+              <p className="note status">표시할 데이터가 없습니다.</p>
+            )}
+            {historyStatus === 'ready' && historyCandles.length > 0 && (
+              <HourlyChart candles={historyCandles} />
+            )}
           </section>
 
           <section>

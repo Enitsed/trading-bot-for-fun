@@ -4,7 +4,8 @@ import path from 'node:path';
 
 export const dynamic = 'force-dynamic';
 
-const SNAPSHOT_PATH = path.join(process.cwd(), 'runtime', 'telemetry.json');
+const ROOT_DIR = path.resolve(process.cwd(), '..');
+const SNAPSHOT_PATH = path.join(ROOT_DIR, 'runtime', 'telemetry.json');
 
 export async function GET() {
   try {

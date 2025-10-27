@@ -4,28 +4,29 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "tsc -p .",
-    "start:live": "node dist/live.js",
-    "start:backtest": "node dist/backtest.js",
-    "dev:live": "node --loader ts-node/esm --env-file .env src/live.ts",
-    "dev:backtest": "node --loader ts-node/esm --env-file .env src/backtest.ts",
-    "dev:web": "next dev",
-    "build:web": "next build",
-    "start:web": "next start"
+    "build": "tsc -p apps/bot/tsconfig.json",
+    "start:live": "node apps/bot/dist/live.js",
+    "start:backtest": "node apps/bot/dist/backtest.js",
+    "dev:live": "node --loader ts-node/esm --env-file .env apps/bot/src/live.ts",
+    "dev:backtest": "node --loader ts-node/esm --env-file .env apps/bot/src/backtest.ts",
+    "dev:web": "next dev apps/web",
+    "build:web": "next build apps/web",
+    "start:web": "next start apps/web"
   },
   "dependencies": {
     "ccxt": "^4.2.99",
     "csv-parse": "^5.5.6",
     "date-fns": "^3.6.0",
     "dotenv": "^16.4.5",
-    "pg": "^8.13.1",
     "next": "^14.2.33",
+    "pg": "^8.13.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.18.10",
+    "@types/pg": "^8.15.5",
     "@types/react": "18.2.63",
     "@types/react-dom": "18.2.19",
     "@types/uuid": "^9.0.7",
