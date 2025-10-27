@@ -16,5 +16,8 @@
     "start:bot": "pnpm --filter @scalper/bot start:live",
     "start:bot:backtest": "pnpm --filter @scalper/bot start:backtest",
     "start:web": "pnpm --filter @scalper/web start"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.10"
   }
 }

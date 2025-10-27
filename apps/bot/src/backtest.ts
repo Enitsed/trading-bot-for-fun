@@ -8,16 +8,96 @@ import { CFG } from './config.js';
 /** CSV format assumed: ts,open,high,low,close,volume (ts in ms) */
 function readCsv(filePath: string): Candle[] {
   const absPath = path.resolve(filePath);
+
+  // 1. 파일 존재 확인
+  if (!fs.existsSync(absPath)) {
+    throw new Error(`CSV file not found: ${absPath}`);
+  }
+
   const text = fs.readFileSync(absPath, 'utf8');
-  const rows = parse(text, { columns: true });
-  return rows.map((row: Record<string, string>) => ({
-    ts: Number(row.ts),
-    open: Number(row.open),
-    high: Number(row.high),
-    low: Number(row.low),
-    close: Number(row.close),
-    vol: Number(row.volume ?? row.vol ?? 0),
-  }));
+  const rows = parse(text, { columns: true }) as Record<string, string>[];
+
+  // 2. 빈 파일 확인
+  if (rows.length === 0) {
+    throw new Error('CSV file is empty');
+  }
+
+  // 3. 필수 컬럼 확인
+  const firstRow = rows[0];
+  const requiredColumns = ['ts', 'open', 'high', 'low', 'close'];
+  const missingColumns = requiredColumns.filter((col) => !(col in firstRow));
+  if (missingColumns.length > 0) {
+    throw new Error(`CSV missing required columns: ${missingColumns.join(', ')}. Found: ${Object.keys(firstRow).join(', ')}`);
+  }
+
+  let lastTs = -1;
+  const candles = rows.map((row, idx) => {
+    const lineNum = idx + 2; // CSV는 1번 줄이 헤더, 2번 줄부터 데이터
+
+    // 4. 숫자 변환 및 검증
+    const ts = Number(row.ts);
+    const open = Number(row.open);
+    const high = Number(row.high);
+    const low = Number(row.low);
+    const close = Number(row.close);
+    const vol = Number(row.volume ?? row.vol ?? 0);
+
+    // NaN 확인
+    if (Number.isNaN(ts)) {
+      throw new Error(`Invalid timestamp at line ${lineNum}: "${row.ts}"`);
+    }
+    if (Number.isNaN(open)) {
+      throw new Error(`Invalid open price at line ${lineNum}: "${row.open}"`);
+    }
+    if (Number.isNaN(high)) {
+      throw new Error(`Invalid high price at line ${lineNum}: "${row.high}"`);
+    }
+    if (Number.isNaN(low)) {
+      throw new Error(`Invalid low price at line ${lineNum}: "${row.low}"`);
+    }
+    if (Number.isNaN(close)) {
+      throw new Error(`Invalid close price at line ${lineNum}: "${row.close}"`);
+    }
+    if (Number.isNaN(vol)) {
+      throw new Error(`Invalid volume at line ${lineNum}: "${row.volume ?? row.vol}"`);
+    }
+
+    // Infinity 확인
+    if (!Number.isFinite(ts) || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+      throw new Error(`Infinite value detected at line ${lineNum}`);
+    }
+
+    // 음수 가격 확인
+    if (open <= 0 || high <= 0 || low <= 0 || close <= 0) {
+      throw new Error(`Non-positive price at line ${lineNum}: open=${open}, high=${high}, low=${low}, close=${close}`);
+    }
+
+    // OHLC 논리 검증 (high >= low, high >= open, high >= close, low <= open, low <= close)
+    if (high < low) {
+      throw new Error(`High (${high}) < Low (${low}) at line ${lineNum}`);
+    }
+    if (high < open || high < close) {
+      throw new Error(`High (${high}) is less than open (${open}) or close (${close}) at line ${lineNum}`);
+    }
+    if (low > open || low > close) {
+      throw new Error(`Low (${low}) is greater than open (${open}) or close (${close}) at line ${lineNum}`);
+    }
+
+    // 5. 타임스탬프 순차 증가 확인
+    if (ts <= lastTs) {
+      throw new Error(`Timestamp not increasing at line ${lineNum}: ${ts} <= ${lastTs}`);
+    }
+    lastTs = ts;
+
+    // 음수 볼륨 확인
+    if (vol < 0) {
+      throw new Error(`Negative volume at line ${lineNum}: ${vol}`);
+    }
+
+    return { ts, open, high, low, close, vol };
+  });
+
+  return candles;
 }
 
 function backtest(candles: Candle[]) {

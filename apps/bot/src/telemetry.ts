@@ -1,9 +1,9 @@
 import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
-import type { Signal, Candle } from '../../../packages/shared/types.js';
+import type { Signal, Candle } from '@scalper/shared/types.js';
 import type { BalanceSnapshot } from './balance.js';
 import { CFG } from './config.js';
-import { botLogger } from '../../../packages/shared/logger.js';
+import { botLogger } from '@scalper/shared/logger.js';
 
 export type Snapshot = {
   timestamp: number;

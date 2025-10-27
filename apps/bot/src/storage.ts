@@ -56,7 +56,10 @@ function getPool(): Pool | null {
           database: CFG.pgDatabase,
         });
     pool.on('error', (err) => {
-      console.error('[PG] Unexpected pool error:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[PG ERROR] Unexpected pool error: ${message}`);
+      console.error(`[PG ERROR] Stack: ${err instanceof Error ? err.stack : 'N/A'}`);
+      // Pool 에러는 연결이 끊어졌을 때 발생하므로, 재연결은 자동으로 시도됨
     });
   }
   return pool;
@@ -136,6 +139,35 @@ export async function prepareStorage(): Promise<boolean> {
   return ready;
 }
 
+// 재시도 헬퍼 함수
+async function retryQuery<T>(
+  operation: () => Promise<T>,
+  maxRetries = 2,
+  operationName = 'query'
+): Promise<T | null> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isLastAttempt = attempt === maxRetries;
+
+      if (isLastAttempt) {
+        console.error(`[PG ERROR] ${operationName} failed after ${maxRetries} attempts: ${message}`);
+        if (error instanceof Error && error.stack) {
+          console.error(`[PG ERROR] Stack: ${error.stack}`);
+        }
+        return null;
+      }
+
+      console.warn(`[PG WARN] ${operationName} failed (attempt ${attempt}/${maxRetries}): ${message}. Retrying...`);
+      // 재시도 전 짧은 대기 (100ms * attempt)
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+  }
+  return null;
+}
+
 export async function recordPriceTick(payload: PriceTickPayload): Promise<void> {
   if (!pgEnabled()) return;
   if (!(await ensureInit())) return;
@@ -143,46 +175,48 @@ export async function recordPriceTick(payload: PriceTickPayload): Promise<void> 
   if (!target) return;
   const recordedAt = new Date(payload.recordedAt ?? Date.now());
   const candleAt = new Date(payload.candleTs);
-  try {
-    await target.query(
-      `
-        INSERT INTO price_ticks (
-          symbol,
-          candle_at,
-          price_open,
-          price_high,
-          price_low,
-          price_close,
-          volume,
-          signal,
-          position,
-          equity,
-          event,
-          runtime_cfg,
-          recorded_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
-      `,
-      [
-        payload.symbol,
-        candleAt,
-        payload.open,
-        payload.high,
-        payload.low,
-        payload.close,
-        payload.volume,
-        payload.signal,
-        Number.isFinite(payload.position) ? payload.position : null,
-        Number.isFinite(payload.equity) ? payload.equity : null,
-        payload.event,
-        payload.runtimeCfg ?? {},
-        recordedAt,
-      ]
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn('[PG] Failed to record price tick:', message);
-  }
+
+  await retryQuery(
+    async () => {
+      await target.query(
+        `
+          INSERT INTO price_ticks (
+            symbol,
+            candle_at,
+            price_open,
+            price_high,
+            price_low,
+            price_close,
+            volume,
+            signal,
+            position,
+            equity,
+            event,
+            runtime_cfg,
+            recorded_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
+        `,
+        [
+          payload.symbol,
+          candleAt,
+          payload.open,
+          payload.high,
+          payload.low,
+          payload.close,
+          payload.volume,
+          payload.signal,
+          Number.isFinite(payload.position) ? payload.position : null,
+          Number.isFinite(payload.equity) ? payload.equity : null,
+          payload.event,
+          payload.runtimeCfg ?? {},
+          recordedAt,
+        ]
+      );
+    },
+    2,
+    'recordPriceTick'
+  );
 }
 
 export async function recordTrade(payload: TradeRecordPayload): Promise<void> {
@@ -192,42 +226,44 @@ export async function recordTrade(payload: TradeRecordPayload): Promise<void> {
   if (!target) return;
   const tradedAt = new Date(payload.ts);
   const recordedAt = new Date(payload.recordedAt ?? Date.now());
-  try {
-    await target.query(
-      `
-        INSERT INTO trade_events (
-          symbol,
-          traded_at,
-          side,
-          amount,
-          price,
-          event,
-          position,
-          equity,
-          order_id,
-          client_order_id,
-          metadata,
-          recorded_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
-      `,
-      [
-        payload.symbol,
-        tradedAt,
-        payload.side,
-        payload.amount,
-        payload.price,
-        payload.event,
-        Number.isFinite(payload.position) ? payload.position : null,
-        Number.isFinite(payload.equity) ? payload.equity : null,
-        payload.orderId ?? null,
-        payload.clientOrderId ?? null,
-        payload.metadata ?? {},
-        recordedAt,
-      ]
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn('[PG] Failed to record trade:', message);
-  }
+
+  await retryQuery(
+    async () => {
+      await target.query(
+        `
+          INSERT INTO trade_events (
+            symbol,
+            traded_at,
+            side,
+            amount,
+            price,
+            event,
+            position,
+            equity,
+            order_id,
+            client_order_id,
+            metadata,
+            recorded_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
+        `,
+        [
+          payload.symbol,
+          tradedAt,
+          payload.side,
+          payload.amount,
+          payload.price,
+          payload.event,
+          Number.isFinite(payload.position) ? payload.position : null,
+          Number.isFinite(payload.equity) ? payload.equity : null,
+          payload.orderId ?? null,
+          payload.clientOrderId ?? null,
+          payload.metadata ?? {},
+          recordedAt,
+        ]
+      );
+    },
+    2,
+    'recordTrade'
+  );
 }

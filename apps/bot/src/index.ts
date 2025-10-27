@@ -5,4 +5,3 @@ export * from './risk.js';
 export * from './exchange.js';
 export * from './indicators.js';
 export * from './telemetry.js';
-export * from './trading-loop.js';

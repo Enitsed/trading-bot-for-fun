@@ -417,6 +417,13 @@ async function loop() {
   console.log(`Starting bot on ${CFG.exchange} ${CFG.symbol} (sandbox=${CFG.useSandbox})`);
   let lastBarTs = 0;
   let runtimeCfg: RuntimeCfg = { ...DEFAULT_RUNTIME_CFG };
+
+  // Exponential backoff을 위한 에러 추적
+  let consecutiveErrors = 0;
+  const MAX_BACKOFF_MS = 300_000; // 최대 5분
+  const BASE_BACKOFF_MS = 10_000; // 기본 10초
+  const MAX_CONSECUTIVE_ERRORS = 10; // 최대 연속 에러 허용 횟수
+
   while (true) {
     try {
       const overrides = await loadOverrides();
@@ -856,11 +863,41 @@ async function loop() {
         });
       }
 
+      // 루프가 성공적으로 완료되면 에러 카운터 리셋
+      consecutiveErrors = 0;
       await sleep(30_000);
     } catch (error) {
+      consecutiveErrors++;
       console.dir(error);
       const message = error instanceof Error ? error.message : JSON.stringify(error);
-      console.error('Loop error:', message);
+      console.error(`[ERROR ${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}] Loop error: ${message}`);
+
+      // 최대 연속 에러 횟수 초과 시 프로세스 종료
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        console.error(
+          `[CRITICAL] Maximum consecutive errors (${MAX_CONSECUTIVE_ERRORS}) reached. Shutting down to prevent infinite retry loop.`
+        );
+        await publishSnapshot({
+          price: 0,
+          signal: 'HOLD',
+          signals: ['HOLD'],
+          position: 0,
+          entryPrice,
+          openBracket,
+          thresholds: { baseMin: 0, baseStep: 0, notionalMin: 0, tradable: 0 },
+          equity: 0,
+          drawdown: 0,
+          mark: 0,
+          balances: { quoteFree: 0, quoteTotal: 0, baseFree: 0, baseTotal: 0 },
+          lastTradeTs,
+          event: `fatal:max_errors_reached`,
+          runtimeCfg,
+          candleTs: Date.now(),
+          candle: null,
+        });
+        process.exit(1);
+      }
+
       await publishSnapshot({
         price: 0,
         signal: 'HOLD',
@@ -879,7 +916,11 @@ async function loop() {
         candleTs: Date.now(),
         candle: null,
       });
-      await sleep(10_000);
+
+      // Exponential backoff: 2^n * BASE_BACKOFF_MS, 최대 MAX_BACKOFF_MS
+      const backoffMs = Math.min(Math.pow(2, consecutiveErrors - 1) * BASE_BACKOFF_MS, MAX_BACKOFF_MS);
+      console.log(`[BACKOFF] Waiting ${backoffMs / 1000}s before retry (attempt ${consecutiveErrors})`);
+      await sleep(backoffMs);
     }
   }
 }

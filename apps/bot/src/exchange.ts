@@ -1,4 +1,5 @@
 import ccxt, { type Exchange, type OHLCV, type Order } from 'ccxt';
+// @ts-expect-error uuid 9.0 타입 정의가 wrapper.mjs에서 제대로 작동하지 않음
 import { v4 as uuidv4 } from 'uuid';
 import { CFG } from './config.js';
 

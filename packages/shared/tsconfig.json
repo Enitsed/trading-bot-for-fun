@@ -1,17 +1,11 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "es2020",
-    "module": "nodenext",
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true,
-    "moduleResolution": "nodenext",
-    "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "strict": true,
-    "skipLibCheck": true
+    "sourceMap": true
   },
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules"]
