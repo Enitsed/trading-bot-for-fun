@@ -1,9 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
-import { HourlyChart } from './components/hourly-chart';
+import { LineSeriesChart } from './components/line-series-chart';
+import { CandlestickChart } from './components/candlestick-chart';
 import type {
   HistoryCandle,
+  HistoryApiResponse,
+  HistoryTimeframe,
+  LinePoint,
   ManualActionPayload,
   ManualActionType,
   RuntimeCfg,
@@ -15,7 +19,21 @@ import type {
 
 const POLL_INTERVAL = 5000;
 const HISTORY_POLL_INTERVAL = 60000;
-const HISTORY_WINDOW_HOURS = 48;
+
+type TimeframeOption = {
+  key: HistoryTimeframe;
+  label: string;
+  hours: number;
+};
+
+const TIMEFRAME_OPTIONS: TimeframeOption[] = [
+  { key: '5m', label: '5분', hours: 24 },
+  { key: '15m', label: '15분', hours: 72 },
+  { key: '1h', label: '1시간', hours: 24 * 7 },
+  { key: '1d', label: '1일', hours: 24 * 30 },
+];
+
+const DEFAULT_TIMEFRAME: HistoryTimeframe = '1h';
 
 type SnapshotStatus = 'loading' | 'ready' | 'error' | 'empty';
 type HistoryStatus = 'loading' | 'ready' | 'error';
@@ -32,12 +50,6 @@ type TelemetryResponse = {
   error?: string;
 };
 
-type HistoryResponse = {
-  ok: boolean;
-  candles: HistoryCandle[];
-  error?: string;
-};
-
 type SettingsOverridesResponse = {
   overrides?: RuntimeOverridesPayload;
 };
@@ -47,6 +59,8 @@ type DashboardCard = {
   value: string;
   note?: string;
 };
+
+type TabKey = 'overview' | 'charts' | 'controls';
 
 function formatNumber(value: number | null | undefined, options: FormatNumberOptions = {}): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
@@ -89,6 +103,9 @@ export default function DashboardPage(): JSX.Element {
   const [historyCandles, setHistoryCandles] = useState<HistoryCandle[]>([]);
   const [historyStatus, setHistoryStatus] = useState<HistoryStatus>('loading');
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [equitySeries, setEquitySeries] = useState<LinePoint[]>([]);
+  const [historyTf, setHistoryTf] = useState<HistoryTimeframe>(DEFAULT_TIMEFRAME);
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
 
   const fetchSnapshot = async (): Promise<void> => {
     try {
@@ -122,28 +139,38 @@ export default function DashboardPage(): JSX.Element {
     const fetchHistory = async (): Promise<void> => {
       try {
         setHistoryStatus((prev) => (prev === 'ready' ? prev : 'loading'));
-        const res = await fetch(`/api/history?hours=${HISTORY_WINDOW_HOURS}`, { cache: 'no-store' });
+        const option = TIMEFRAME_OPTIONS.find((item) => item.key === historyTf);
+        const hoursParam = option?.hours ?? TIMEFRAME_OPTIONS[0].hours;
+        const params = new URLSearchParams({ hours: String(hoursParam), tf: historyTf });
+        const res = await fetch(`/api/history?${params.toString()}`, { cache: 'no-store' });
         if (!res.ok) {
           throw new Error(`요청 실패: ${res.status}`);
         }
-        const body = (await res.json()) as HistoryResponse;
+        const body = (await res.json()) as HistoryApiResponse;
         if (!body?.ok) {
           throw new Error(body?.error || '데이터를 불러오지 못했습니다.');
         }
+        if (body.timeframe && body.timeframe !== historyTf) {
+          setHistoryTf(body.timeframe);
+          return;
+        }
         setHistoryCandles(body.candles ?? []);
+        setEquitySeries(body.equity ?? []);
         setHistoryStatus('ready');
         setHistoryError(null);
       } catch (err) {
         console.error(err);
         setHistoryStatus('error');
         setHistoryError(err instanceof Error ? err.message : String(err));
+        setHistoryCandles([]);
+        setEquitySeries([]);
       }
     };
 
     fetchHistory();
     const id = setInterval(fetchHistory, HISTORY_POLL_INTERVAL);
     return () => clearInterval(id);
-  }, []);
+  }, [historyTf]);
 
   useEffect(() => {
     const bootstrapSettings = async (): Promise<void> => {
@@ -236,6 +263,18 @@ export default function DashboardPage(): JSX.Element {
     }
   };
 
+  const priceSeries = useMemo<LinePoint[]>(
+    () => historyCandles.map((item) => ({ timestamp: item.timestamp, value: item.close })),
+    [historyCandles]
+  );
+
+  const activeTimeframe = useMemo(() => {
+    return TIMEFRAME_OPTIONS.find((item) => item.key === historyTf) ?? TIMEFRAME_OPTIONS[0];
+  }, [historyTf]);
+
+  const historyRangeHours = activeTimeframe.hours;
+  const timeframeLabel = activeTimeframe.label;
+
   const cards = useMemo<DashboardCard[]>(() => {
     if (!snapshot) return [];
     const price = formatNumber(snapshot.price, { fractionDigits: 2 });
@@ -257,8 +296,14 @@ export default function DashboardPage(): JSX.Element {
   const recentSignals = snapshot?.recentSignals ?? [];
   const runtimeCfg: RuntimeCfg | undefined = snapshot?.runtimeCfg ?? undefined;
 
-  return (
-    <main className="page">
+  const tabs: { key: TabKey; label: string }[] = [
+    { key: 'overview', label: '현황 요약' },
+    { key: 'charts', label: '차트 분석' },
+    { key: 'controls', label: '설정 & 수동' },
+  ];
+
+  const renderOverview = (): JSX.Element => (
+    <>
       <header>
         <h1>실시간 트레이딩 현황</h1>
         <p className="meta">
@@ -333,20 +378,6 @@ export default function DashboardPage(): JSX.Element {
             </div>
           </section>
 
-          <section className="panel chart-panel">
-            <h3>시간별 가격 (최근 {HISTORY_WINDOW_HOURS}시간)</h3>
-            {historyStatus === 'loading' && <p className="note">차트를 준비하는 중입니다…</p>}
-            {historyStatus === 'error' && (
-              <p className="note status">차트를 불러오지 못했습니다: {historyError}</p>
-            )}
-            {historyStatus === 'ready' && historyCandles.length === 0 && (
-              <p className="note status">표시할 데이터가 없습니다.</p>
-            )}
-            {historyStatus === 'ready' && historyCandles.length > 0 && (
-              <HourlyChart candles={historyCandles} />
-            )}
-          </section>
-
           <section>
             <h3>최근 신호</h3>
             <ul className="signals">
@@ -355,138 +386,224 @@ export default function DashboardPage(): JSX.Element {
               ))}
             </ul>
           </section>
+        </>
+      )}
+    </>
+  );
 
-          <section className="panel">
-            <h3>전략 설정</h3>
-            <p className="note">
-              값은 다음 루프에서 반영됩니다. 비워두면 기존 값을 유지합니다.
-            </p>
-            {runtimeCfg && (
-              <p className="note current">
-                현재: RSI({runtimeCfg.rsiLen}) · 진입 {runtimeCfg.rsiEntry} / 청산 {runtimeCfg.rsiExit} · 위험 {(
-                  runtimeCfg.riskPerTrade * 100
-                ).toFixed(2)}%
-              </p>
+  const renderCharts = (): JSX.Element => (
+    <>
+      <div className="timeframe-toggle">
+        {TIMEFRAME_OPTIONS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            className={key === historyTf ? 'active' : ''}
+            onClick={() => setHistoryTf(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {historyStatus === 'loading' && <p className="notice">차트를 준비하는 중입니다…</p>}
+      {historyStatus === 'error' && (
+        <p className="notice error">차트를 불러오지 못했습니다: {historyError ?? '알 수 없는 오류'}</p>
+      )}
+
+      {historyStatus === 'ready' && (
+        <>
+          <section className="panel chart-panel">
+            <h3>
+              시간별 캔들 ({timeframeLabel} · 최근 {historyRangeHours}시간)
+            </h3>
+            {historyCandles.length === 0 ? (
+              <p className="note status">표시할 데이터가 없습니다.</p>
+            ) : (
+              <CandlestickChart candles={historyCandles} />
             )}
-            <form className="settings-form" onSubmit={handleSettingsSubmit}>
-              <div className="form-grid">
-                <label>
-                  RSI 기간
-                  <input
-                    type="number"
-                    min="2"
-                    step="1"
-                    value={settingsForm.rsiLen}
-                    onChange={handleSettingsChange('rsiLen')}
-                    placeholder="예: 14"
-                  />
-                </label>
-                <label>
-                  RSI 진입
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    value={settingsForm.rsiEntry}
-                    onChange={handleSettingsChange('rsiEntry')}
-                    placeholder="예: 30"
-                  />
-                </label>
-                <label>
-                  RSI 청산
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    value={settingsForm.rsiExit}
-                    onChange={handleSettingsChange('rsiExit')}
-                    placeholder="예: 50"
-                  />
-                </label>
-                <label>
-                  손절 (%)
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={settingsForm.stopPct}
-                    onChange={handleSettingsChange('stopPct')}
-                    placeholder="예: 0.7"
-                  />
-                </label>
-                <label>
-                  익절 (%)
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={settingsForm.takePct}
-                    onChange={handleSettingsChange('takePct')}
-                    placeholder="예: 1.2"
-                  />
-                </label>
-                <label>
-                  위험 비율 (%)
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={settingsForm.riskPerTrade}
-                    onChange={handleSettingsChange('riskPerTrade')}
-                    placeholder="예: 1"
-                  />
-                </label>
-                <label>
-                  쿨다운 (분)
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={settingsForm.cooldownMin}
-                    onChange={handleSettingsChange('cooldownMin')}
-                    placeholder="예: 10"
-                  />
-                </label>
-              </div>
-              <button type="submit" className="primary" disabled={!settingsDirty}>
-                전략 저장
-              </button>
-              {settingsStatus && <p className="note status">{settingsStatus}</p>}
-            </form>
           </section>
 
-          <section className="panel">
-            <h3>수동 매매</h3>
-            <div className="manual">
-              <label>
-                주문 수량 (베이스)
-                <input
-                  type="number"
-                  min="0"
-                  step="0.000001"
-                  value={manualAmount}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setManualAmount(event.target.value)}
-                  placeholder="미입력 시 최소 주문"
-                />
-              </label>
-              <div className="actions">
-                <button type="button" onClick={() => handleManualAction('manual-buy')}>
-                  수동 매수
-                </button>
-                <button type="button" onClick={() => handleManualAction('manual-sell')}>
-                  수동 매도
-                </button>
-                <button type="button" onClick={() => handleManualAction('flatten')}>
-                  전량 청산
-                </button>
-              </div>
-            </div>
-            {actionStatus && <p className="note status">{actionStatus}</p>}
+          <section className="panel chart-panel">
+            <h3>시간별 종가 추이 ({timeframeLabel})</h3>
+            {priceSeries.length === 0 ? (
+              <p className="note status">표시할 데이터가 없습니다.</p>
+            ) : (
+              <LineSeriesChart points={priceSeries} gradientId="price-series" />
+            )}
+          </section>
+
+          <section className="panel chart-panel">
+            <h3>시간별 잔고 변화 ({timeframeLabel})</h3>
+            {equitySeries.length === 0 ? (
+              <p className="note status">잔고 데이터가 없습니다.</p>
+            ) : (
+              <LineSeriesChart
+                points={equitySeries}
+                gradientId="equity-series"
+                color="#34d399"
+                emptyLabel="잔고 데이터가 없습니다."
+              />
+            )}
           </section>
         </>
       )}
+    </>
+  );
+
+  const renderControls = (): JSX.Element => (
+    <>
+      <section className="panel">
+        <h3>전략 설정</h3>
+        <p className="note">값은 다음 루프에서 반영됩니다. 비워두면 기존 값을 유지합니다.</p>
+        {runtimeCfg && (
+          <p className="note current">
+            현재: RSI({runtimeCfg.rsiLen}) · 진입 {runtimeCfg.rsiEntry} / 청산 {runtimeCfg.rsiExit} · 위험 {(
+              runtimeCfg.riskPerTrade * 100
+            ).toFixed(2)}%
+          </p>
+        )}
+        <form className="settings-form" onSubmit={handleSettingsSubmit}>
+          <div className="form-grid">
+            <label>
+              RSI 기간
+              <input
+                type="number"
+                min="2"
+                step="1"
+                value={settingsForm.rsiLen}
+                onChange={handleSettingsChange('rsiLen')}
+                placeholder="예: 14"
+              />
+            </label>
+            <label>
+              RSI 진입
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={settingsForm.rsiEntry}
+                onChange={handleSettingsChange('rsiEntry')}
+                placeholder="예: 30"
+              />
+            </label>
+            <label>
+              RSI 청산
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={settingsForm.rsiExit}
+                onChange={handleSettingsChange('rsiExit')}
+                placeholder="예: 50"
+              />
+            </label>
+            <label>
+              손절 (%)
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={settingsForm.stopPct}
+                onChange={handleSettingsChange('stopPct')}
+                placeholder="예: 0.7"
+              />
+            </label>
+            <label>
+              익절 (%)
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={settingsForm.takePct}
+                onChange={handleSettingsChange('takePct')}
+                placeholder="예: 1.2"
+              />
+            </label>
+            <label>
+              위험 비율 (%)
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={settingsForm.riskPerTrade}
+                onChange={handleSettingsChange('riskPerTrade')}
+                placeholder="예: 1"
+              />
+            </label>
+            <label>
+              쿨다운 (분)
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={settingsForm.cooldownMin}
+                onChange={handleSettingsChange('cooldownMin')}
+                placeholder="예: 10"
+              />
+            </label>
+          </div>
+          <button type="submit" className="primary" disabled={!settingsDirty}>
+            전략 저장
+          </button>
+          {settingsStatus && <p className="note status">{settingsStatus}</p>}
+        </form>
+      </section>
+
+      <section className="panel">
+        <h3>수동 매매</h3>
+        <div className="manual">
+          <label>
+            주문 수량 (베이스)
+            <input
+              type="number"
+              min="0"
+              step="0.000001"
+              value={manualAmount}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setManualAmount(event.target.value)}
+              placeholder="미입력 시 최소 주문"
+            />
+          </label>
+          <div className="actions">
+            <button type="button" onClick={() => handleManualAction('manual-buy')}>
+              수동 매수
+            </button>
+            <button type="button" onClick={() => handleManualAction('manual-sell')}>
+              수동 매도
+            </button>
+            <button type="button" onClick={() => handleManualAction('flatten')}>
+              전량 청산
+            </button>
+          </div>
+        </div>
+        {actionStatus && <p className="note status">{actionStatus}</p>}
+      </section>
+    </>
+  );
+
+  return (
+    <main className="page with-tabs">
+      <div className="tab-layout">
+        <nav className="tab-sidebar">
+          {tabs.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              className={key === activeTab ? 'active' : ''}
+              onClick={() => setActiveTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="tab-content">
+          {activeTab === 'overview' && renderOverview()}
+          {activeTab === 'charts' && renderCharts()}
+          {activeTab === 'controls' && renderControls()}
+        </div>
+      </div>
     </main>
   );
 }

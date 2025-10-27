@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
-import type { HistoryCandle } from '../../../lib/types';
+import type { HistoryCandle, LinePoint, HistoryTimeframe } from '../../../lib/types';
 
-const MAX_HOURS = 240;
+const MAX_HOURS = 24 * 180;
 let pool: Pool | null = null;
 
 const PG_ENABLE = (process.env.PG_ENABLE || '').toLowerCase() === 'true';
@@ -13,6 +13,15 @@ const PG_USER = process.env.PG_USER || 'postgres';
 const PG_PASSWORD = process.env.PG_PASSWORD || '';
 const PG_DATABASE = process.env.PG_DATABASE || 'scalper';
 
+const TIMEFRAME_MS: Record<HistoryTimeframe, number> = {
+  '5m': 5 * 60 * 1000,
+  '15m': 15 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+  '1d': 24 * 60 * 60 * 1000,
+};
+
+const DEFAULT_TIMEFRAME: HistoryTimeframe = '1h';
+
 type RawTick = {
   candle_at: string;
   price_open: string;
@@ -20,11 +29,14 @@ type RawTick = {
   price_low: string;
   price_close: string;
   volume: string;
+  equity: string | null;
 };
 
 type Bucket = HistoryCandle & {
   firstTs: number;
   lastTs: number;
+  equity: number | null;
+  equityTs: number;
 };
 
 function ensurePool(): Pool {
@@ -56,13 +68,20 @@ function normalizeHours(param: string | null): number {
   return Math.min(Math.floor(parsed), MAX_HOURS);
 }
 
-function quantizeHour(timestamp: number): number {
-  const date = new Date(timestamp);
-  date.setMinutes(0, 0, 0);
-  return date.getTime();
+function resolveTimeframe(param: string | null): HistoryTimeframe {
+  if (!param) return DEFAULT_TIMEFRAME;
+  const key = param.toLowerCase();
+  if (key === '5m' || key === '15m' || key === '1h' || key === '1d') {
+    return key;
+  }
+  return DEFAULT_TIMEFRAME;
 }
 
-function aggregateHourly(rows: RawTick[]): HistoryCandle[] {
+function quantizeToWindow(timestamp: number, windowMs: number): number {
+  return Math.floor(timestamp / windowMs) * windowMs;
+}
+
+function aggregateByWindow(rows: RawTick[], windowMs: number): { candles: HistoryCandle[]; equitySeries: LinePoint[] } {
   const buckets = new Map<number, Bucket>();
 
   for (const row of rows) {
@@ -76,8 +95,10 @@ function aggregateHourly(rows: RawTick[]): HistoryCandle[] {
     if (![open, high, low, close, volume].every((value) => Number.isFinite(value))) {
       continue;
     }
-    const bucketKey = quantizeHour(candleTs);
+    const bucketKey = quantizeToWindow(candleTs, windowMs);
     const existing = buckets.get(bucketKey);
+    const equity = row.equity !== null ? Number(row.equity) : Number.NaN;
+
     if (!existing) {
       buckets.set(bucketKey, {
         timestamp: bucketKey,
@@ -88,6 +109,8 @@ function aggregateHourly(rows: RawTick[]): HistoryCandle[] {
         volume,
         firstTs: candleTs,
         lastTs: candleTs,
+        equity: Number.isFinite(equity) ? equity : null,
+        equityTs: Number.isFinite(equity) ? candleTs : Number.NEGATIVE_INFINITY,
       });
       continue;
     }
@@ -107,11 +130,21 @@ function aggregateHourly(rows: RawTick[]): HistoryCandle[] {
       existing.low = low;
     }
     existing.volume += volume;
+
+    if (Number.isFinite(equity) && candleTs >= existing.equityTs) {
+      existing.equity = equity;
+      existing.equityTs = candleTs;
+    }
   }
 
-  return Array.from(buckets.values())
-    .map(({ firstTs: _firstTs, lastTs: _lastTs, ...rest }) => rest)
-    .sort((a, b) => a.timestamp - b.timestamp);
+  const ordered = Array.from(buckets.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+  const candles = ordered.map(({ firstTs: _firstTs, lastTs: _lastTs, equity: _equity, equityTs: _eqTs, ...rest }) => rest);
+  const equitySeries = ordered
+    .filter((item) => Number.isFinite(item.equity))
+    .map((item) => ({ timestamp: item.timestamp, value: item.equity as number }));
+
+  return { candles, equitySeries };
 }
 
 export async function GET(request: Request) {
@@ -121,20 +154,22 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const hours = normalizeHours(url.searchParams.get('hours'));
+  const timeframe = resolveTimeframe(url.searchParams.get('tf'));
+  const windowMs = TIMEFRAME_MS[timeframe];
 
   try {
     const client = ensurePool();
     const { rows } = await client.query<RawTick>(
       `
-        SELECT candle_at, price_open, price_high, price_low, price_close, volume
+        SELECT candle_at, price_open, price_high, price_low, price_close, volume, equity
         FROM price_ticks
         WHERE candle_at >= NOW() - ($1::int * INTERVAL '1 hour')
         ORDER BY candle_at ASC
       `,
       [hours]
     );
-    const candles = aggregateHourly(rows);
-    return NextResponse.json({ ok: true, candles });
+    const { candles, equitySeries } = aggregateByWindow(rows, windowMs);
+    return NextResponse.json({ ok: true, timeframe, candles, equity: equitySeries });
   } catch (error) {
     console.error('[history] query failed', error);
     return NextResponse.json({ ok: false, error: 'INTERNAL_ERROR' }, { status: 500 });

@@ -22,6 +22,8 @@ export type RuntimeOverrideKey =
 export type RuntimeOverrides = Partial<Record<RuntimeOverrideKey, number>>;
 export type RuntimeOverridesPayload = Partial<Record<RuntimeOverrideKey, number | null>>;
 
+export type HistoryTimeframe = '5m' | '15m' | '1h' | '1d';
+
 export type HistoryCandle = {
   timestamp: number;
   open: number;
@@ -29,6 +31,11 @@ export type HistoryCandle = {
   low: number;
   close: number;
   volume: number;
+};
+
+export type LinePoint = {
+  timestamp: number;
+  value: number;
 };
 
 export type RuntimeCfg = {
@@ -67,4 +74,12 @@ export type TelemetrySnapshot = {
   lastTradeTs: number | null;
   event: string;
   runtimeCfg: RuntimeCfg;
+};
+
+export type HistoryApiResponse = {
+  ok: boolean;
+  candles: HistoryCandle[];
+  equity: LinePoint[];
+  timeframe: HistoryTimeframe;
+  error?: string;
 };

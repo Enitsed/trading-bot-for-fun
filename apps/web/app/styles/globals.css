@@ -169,7 +169,6 @@ header .meta {
 }
 
 .chart-line {
-  stroke: #60a5fa;
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -197,6 +196,104 @@ header .meta {
 .chart-empty {
   margin: 0;
   color: #9aa3b5;
+}
+
+.page.with-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.tab-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 32px;
+}
+
+.tab-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tab-sidebar button {
+  background: rgba(24, 32, 52, 0.7);
+  border: 1px solid rgba(148, 163, 230, 0.25);
+  border-radius: 12px;
+  padding: 12px 16px;
+  color: #cbd5f5;
+  font-size: 0.95rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.tab-sidebar button.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.4), rgba(59, 130, 246, 0.4));
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #f5f7fb;
+}
+
+.tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.timeframe-toggle {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.timeframe-toggle button {
+  background: rgba(24, 32, 52, 0.7);
+  border: 1px solid rgba(148, 163, 230, 0.25);
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: #cbd5f5;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.timeframe-toggle button.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.4), rgba(59, 130, 246, 0.4));
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #f5f7fb;
+}
+
+@media (max-width: 960px) {
+  .tab-layout {
+    grid-template-columns: 1fr;
+  }
+  .tab-sidebar {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .tab-sidebar button {
+    flex: 1;
+    white-space: nowrap;
+  }
+}
+
+.candle-wick {
+  stroke: rgba(148, 163, 230, 0.6);
+  stroke-width: 1.5;
+}
+
+.candle-body {
+  stroke-width: 1;
+}
+
+.candle-body.bullish {
+  fill: rgba(74, 222, 128, 0.6);
+  stroke: #4ade80;
+}
+
+.candle-body.bearish {
+  fill: rgba(248, 113, 113, 0.6);
+  stroke: #f87171;
 }
 
 .settings-form {
