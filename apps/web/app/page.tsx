@@ -1,13 +1,54 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { HourlyChart } from './components/hourly-chart.jsx';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { HourlyChart } from './components/hourly-chart';
+import type {
+  HistoryCandle,
+  ManualActionPayload,
+  ManualActionType,
+  RuntimeCfg,
+  RuntimeOverrideKey,
+  RuntimeOverrides,
+  RuntimeOverridesPayload,
+  TelemetrySnapshot,
+} from '../lib/types';
 
 const POLL_INTERVAL = 5000;
 const HISTORY_POLL_INTERVAL = 60000;
 const HISTORY_WINDOW_HOURS = 48;
 
-function formatNumber(value, options = {}) {
+type SnapshotStatus = 'loading' | 'ready' | 'error' | 'empty';
+type HistoryStatus = 'loading' | 'ready' | 'error';
+
+type FormatNumberOptions = {
+  fractionDigits?: number;
+};
+
+type SettingsFormState = Record<RuntimeOverrideKey, string>;
+
+type TelemetryResponse = {
+  ok?: boolean;
+  data?: TelemetrySnapshot | null;
+  error?: string;
+};
+
+type HistoryResponse = {
+  ok: boolean;
+  candles: HistoryCandle[];
+  error?: string;
+};
+
+type SettingsOverridesResponse = {
+  overrides?: RuntimeOverridesPayload;
+};
+
+type DashboardCard = {
+  label: string;
+  value: string;
+  note?: string;
+};
+
+function formatNumber(value: number | null | undefined, options: FormatNumberOptions = {}): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
   const { fractionDigits = 2 } = options;
   return new Intl.NumberFormat('ko-KR', {
@@ -16,7 +57,7 @@ function formatNumber(value, options = {}) {
   }).format(value);
 }
 
-function formatTimestamp(ts) {
+function formatTimestamp(ts: number | null | undefined): string {
   if (!ts) return '-';
   try {
     return new Intl.DateTimeFormat('ko-KR', {
@@ -28,13 +69,13 @@ function formatTimestamp(ts) {
   }
 }
 
-export default function DashboardPage() {
-  const [snapshot, setSnapshot] = useState(null);
-  const [status, setStatus] = useState('loading');
-  const [error, setError] = useState(null);
-  const [manualAmount, setManualAmount] = useState('');
-  const [actionStatus, setActionStatus] = useState(null);
-  const [settingsForm, setSettingsForm] = useState({
+export default function DashboardPage(): JSX.Element {
+  const [snapshot, setSnapshot] = useState<TelemetrySnapshot | null>(null);
+  const [status, setStatus] = useState<SnapshotStatus>('loading');
+  const [error, setError] = useState<string | null>(null);
+  const [manualAmount, setManualAmount] = useState<string>('');
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [settingsForm, setSettingsForm] = useState<SettingsFormState>({
     rsiLen: '',
     rsiEntry: '',
     rsiExit: '',
@@ -44,18 +85,18 @@ export default function DashboardPage() {
     cooldownMin: '',
   });
   const [settingsDirty, setSettingsDirty] = useState(false);
-  const [settingsStatus, setSettingsStatus] = useState(null);
-  const [historyCandles, setHistoryCandles] = useState([]);
-  const [historyStatus, setHistoryStatus] = useState('loading');
-  const [historyError, setHistoryError] = useState(null);
+  const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
+  const [historyCandles, setHistoryCandles] = useState<HistoryCandle[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<HistoryStatus>('loading');
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  const fetchSnapshot = async () => {
+  const fetchSnapshot = async (): Promise<void> => {
     try {
       const res = await fetch('/api/telemetry', { cache: 'no-store' });
       if (!res.ok) {
         throw new Error(`요청 실패: ${res.status}`);
       }
-      const body = await res.json();
+      const body = (await res.json()) as TelemetryResponse;
       if (!body?.data) {
         setSnapshot(null);
         setStatus('empty');
@@ -63,9 +104,10 @@ export default function DashboardPage() {
       }
       setSnapshot(body.data);
       setStatus('ready');
+      setError(null);
     } catch (err) {
       console.error(err);
-      setError(err.message);
+      setError(err instanceof Error ? err.message : String(err));
       setStatus('error');
     }
   };
@@ -77,14 +119,14 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const fetchHistory = async () => {
+    const fetchHistory = async (): Promise<void> => {
       try {
         setHistoryStatus((prev) => (prev === 'ready' ? prev : 'loading'));
         const res = await fetch(`/api/history?hours=${HISTORY_WINDOW_HOURS}`, { cache: 'no-store' });
         if (!res.ok) {
           throw new Error(`요청 실패: ${res.status}`);
         }
-        const body = await res.json();
+        const body = (await res.json()) as HistoryResponse;
         if (!body?.ok) {
           throw new Error(body?.error || '데이터를 불러오지 못했습니다.');
         }
@@ -94,7 +136,7 @@ export default function DashboardPage() {
       } catch (err) {
         console.error(err);
         setHistoryStatus('error');
-        setHistoryError(err.message);
+        setHistoryError(err instanceof Error ? err.message : String(err));
       }
     };
 
@@ -104,15 +146,15 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const bootstrapSettings = async () => {
+    const bootstrapSettings = async (): Promise<void> => {
       try {
         const res = await fetch('/api/settings', { cache: 'no-store' });
         if (!res.ok) return;
-        const body = await res.json();
+        const body = (await res.json()) as SettingsOverridesResponse;
         if (!body?.overrides) return;
         setSettingsForm((prev) => ({
           ...prev,
-          ...mapRuntimeToForm(body.overrides, prev),
+          ...mapRuntimeToForm(body.overrides ?? {}, prev),
         }));
       } catch (err) {
         console.warn('Failed to load overrides', err);
@@ -130,13 +172,13 @@ export default function DashboardPage() {
     }));
   }, [snapshot, settingsDirty]);
 
-  const handleSettingsChange = (key) => (event) => {
-    const value = event.target.value;
+  const handleSettingsChange = (key: RuntimeOverrideKey) => (event: ChangeEvent<HTMLInputElement>) => {
+    const { value } = event.target;
     setSettingsForm((prev) => ({ ...prev, [key]: value }));
     setSettingsDirty(true);
   };
 
-  const handleSettingsSubmit = async (event) => {
+  const handleSettingsSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSettingsStatus('저장 중…');
     try {
@@ -159,14 +201,15 @@ export default function DashboardPage() {
       setSettingsDirty(false);
     } catch (err) {
       console.error(err);
-      setSettingsStatus(`저장 실패: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      setSettingsStatus(`저장 실패: ${message}`);
     }
   };
 
-  const handleManualAction = async (type) => {
+  const handleManualAction = async (type: ManualActionType) => {
     setActionStatus('요청 중…');
     try {
-      const body = { type };
+      const body: ManualActionPayload = { type };
       if (type !== 'flatten' && manualAmount.trim() !== '') {
         const amount = Number(manualAmount);
         if (!Number.isFinite(amount) || amount <= 0) {
@@ -188,15 +231,16 @@ export default function DashboardPage() {
         setManualAmount('');
       }
     } catch (err) {
-      setActionStatus(`실패: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      setActionStatus(`실패: ${message}`);
     }
   };
 
-  const cards = useMemo(() => {
+  const cards = useMemo<DashboardCard[]>(() => {
     if (!snapshot) return [];
     const price = formatNumber(snapshot.price, { fractionDigits: 2 });
     const equity = formatNumber(snapshot.equity, { fractionDigits: 2 });
-    const drawdown = snapshot.drawdown?.toFixed?.(2);
+    const drawdown = snapshot.drawdown !== undefined ? snapshot.drawdown.toFixed?.(2) : undefined;
     const position = formatNumber(snapshot.position, { fractionDigits: 6 });
     const quoteFree = formatNumber(snapshot.balances?.quoteFree, { fractionDigits: 2 });
     const baseFree = formatNumber(snapshot.balances?.baseFree, { fractionDigits: 6 });
@@ -211,7 +255,7 @@ export default function DashboardPage() {
   }, [snapshot]);
 
   const recentSignals = snapshot?.recentSignals ?? [];
-  const runtimeCfg = snapshot?.runtimeCfg;
+  const runtimeCfg: RuntimeCfg | undefined = snapshot?.runtimeCfg ?? undefined;
 
   return (
     <main className="page">
@@ -423,7 +467,7 @@ export default function DashboardPage() {
                   min="0"
                   step="0.000001"
                   value={manualAmount}
-                  onChange={(e) => setManualAmount(e.target.value)}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setManualAmount(event.target.value)}
                   placeholder="미입력 시 최소 주문"
                 />
               </label>
@@ -447,47 +491,54 @@ export default function DashboardPage() {
   );
 }
 
-function mapRuntimeToForm(source, prev) {
-  const next = { ...prev };
+function mapRuntimeToForm(
+  source: Partial<Record<RuntimeOverrideKey, number | null | undefined>>,
+  prev: SettingsFormState
+): SettingsFormState {
+  const next: SettingsFormState = { ...prev };
   if (source.rsiLen !== undefined) next.rsiLen = String(source.rsiLen ?? '');
   if (source.rsiEntry !== undefined) next.rsiEntry = String(source.rsiEntry ?? '');
   if (source.rsiExit !== undefined) next.rsiExit = String(source.rsiExit ?? '');
   if (source.stopPct !== undefined)
-    next.stopPct = source.stopPct !== null ? formatPercentInput(source.stopPct) : '';
+    next.stopPct = source.stopPct !== null && source.stopPct !== undefined ? formatPercentInput(source.stopPct) : '';
   if (source.takePct !== undefined)
-    next.takePct = source.takePct !== null ? formatPercentInput(source.takePct) : '';
+    next.takePct = source.takePct !== null && source.takePct !== undefined ? formatPercentInput(source.takePct) : '';
   if (source.riskPerTrade !== undefined)
-    next.riskPerTrade = source.riskPerTrade !== null ? formatPercentInput(source.riskPerTrade) : '';
+    next.riskPerTrade =
+      source.riskPerTrade !== null && source.riskPerTrade !== undefined ? formatPercentInput(source.riskPerTrade) : '';
   if (source.cooldownMin !== undefined) next.cooldownMin = String(source.cooldownMin ?? '');
   return next;
 }
 
-function buildSettingsPayload(form) {
-  const payload = {};
+function buildSettingsPayload(form: SettingsFormState): RuntimeOverrides | null {
+  const converters: Record<RuntimeOverrideKey, (value: string) => number> = {
+    rsiLen: (value) => Number(value),
+    rsiEntry: (value) => Number(value),
+    rsiExit: (value) => Number(value),
+    stopPct: (value) => Number(value) / 100,
+    takePct: (value) => Number(value) / 100,
+    riskPerTrade: (value) => Number(value) / 100,
+    cooldownMin: (value) => Number(value),
+  };
+
+  const payload: RuntimeOverrides = {};
   let changed = false;
-  const map = [
-    ['rsiLen', (v) => Number(v)],
-    ['rsiEntry', (v) => Number(v)],
-    ['rsiExit', (v) => Number(v)],
-    ['stopPct', (v) => Number(v) / 100],
-    ['takePct', (v) => Number(v) / 100],
-    ['riskPerTrade', (v) => Number(v) / 100],
-    ['cooldownMin', (v) => Number(v)],
-  ];
-  for (const [key, convert] of map) {
+
+  for (const key of Object.keys(converters) as RuntimeOverrideKey[]) {
     const raw = form[key];
     if (raw === undefined || raw === null || raw === '') continue;
-    const num = convert(raw);
+    const num = converters[key](raw);
     if (!Number.isFinite(num)) {
       throw new Error(`${key} 값이 올바르지 않습니다.`);
     }
     payload[key] = num;
     changed = true;
   }
+
   return changed ? payload : null;
 }
 
-function formatPercentInput(value) {
+function formatPercentInput(value: number): string {
   const scaled = Number(value) * 100;
   if (!Number.isFinite(scaled)) return '';
   return parseFloat(scaled.toFixed(4)).toString();

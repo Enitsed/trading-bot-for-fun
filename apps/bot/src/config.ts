@@ -1,4 +1,19 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const localEnvPath = path.resolve(moduleDir, '../.env');
+
+if (!process.env.__BOT_ENV_LOADED__) {
+  if (existsSync(localEnvPath)) {
+    loadEnv({ path: localEnvPath });
+  } else {
+    loadEnv();
+  }
+  process.env.__BOT_ENV_LOADED__ = 'true';
+}
 
 export type ExchangeId = 'binance' | 'upbit';
 

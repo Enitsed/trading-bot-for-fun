@@ -15,7 +15,8 @@
    # 또는 npm install / yarn install
    ```
 2. **환경 설정**
-   - `.env.example`을 `.env`로 복사하고 거래소 API 정보를 채워 넣습니다.
+   - `apps/bot/.env.example`을 `apps/bot/.env`로 복사하고 거래소 API 정보를 채워 넣습니다.
+   - 대시보드에서 심볼/통화와 Postgres 연결을 제어하려면 `apps/web/.env.example`을 `apps/web/.env`로 복사해 값을 조정합니다.
    - Binance 사용자는 `EXCHANGE=binanceus`, `USE_SANDBOX=true`로 테스트넷을 사용할 수 있습니다.
    - Upbit 사용자는 `EXCHANGE=upbit`, `USE_SANDBOX=false`, `DRY_RUN=true`(Upbit에는 공식 샌드박스가 없음)로 시작하세요.
    - 시세/체결 히스토리를 남기려면 Postgres를 준비하고 `PG_ENABLE=true`와 `PG_URL` 또는 `PG_HOST`/`PG_USER`/`PG_PASSWORD`/`PG_DATABASE` 값을 채웁니다. 봇이 기동되면 `price_ticks`, `trade_events` 테이블을 자동 생성합니다.
@@ -55,6 +56,7 @@ apps/
     next.config.mjs
     tsconfig.next.json
 runtime/        # 봇과 대시보드가 공유하는 런타임 파일 (telemetry, commands 등)
+.env             # 실행에 사용하는 통합 환경변수 (선택)
 ```
 
 ## Postgres 기록

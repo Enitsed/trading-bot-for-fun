@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
+import type { HistoryCandle } from '../../../lib/types';
 
 const MAX_HOURS = 240;
 let pool: Pool | null = null;
@@ -21,16 +22,7 @@ type RawTick = {
   volume: string;
 };
 
-type HourlyCandle = {
-  timestamp: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-};
-
-type Bucket = HourlyCandle & {
+type Bucket = HistoryCandle & {
   firstTs: number;
   lastTs: number;
 };
@@ -70,7 +62,7 @@ function quantizeHour(timestamp: number): number {
   return date.getTime();
 }
 
-function aggregateHourly(rows: RawTick[]): HourlyCandle[] {
+function aggregateHourly(rows: RawTick[]): HistoryCandle[] {
   const buckets = new Map<number, Bucket>();
 
   for (const row of rows) {

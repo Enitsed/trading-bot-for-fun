@@ -1,19 +1,21 @@
 import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { resolveRuntimePath } from '../../../lib/runtime-path';
+import type { TelemetrySnapshot } from '../../../lib/types';
 
 export const dynamic = 'force-dynamic';
 
-const ROOT_DIR = path.resolve(process.cwd(), '..');
-const SNAPSHOT_PATH = path.join(ROOT_DIR, 'runtime', 'telemetry.json');
+const SNAPSHOT_PATH = path.join(resolveRuntimePath(), 'telemetry.json');
 
 export async function GET() {
   try {
     const raw = await readFile(SNAPSHOT_PATH, 'utf8');
-    const data = JSON.parse(raw);
+    const data = JSON.parse(raw) as TelemetrySnapshot;
     return NextResponse.json({ ok: true, data });
   } catch (error) {
-    if (error?.code === 'ENOENT') {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'ENOENT') {
       return NextResponse.json({ ok: false, data: null });
     }
     console.error('[telemetry] read error', error);
