@@ -1,0 +1,26 @@
+{
+  "cSpell.words": [
+    "ccxt",
+    "Upbit",
+    "backtest",
+    "binanceus",
+    "upbit",
+    "COOLDOWN",
+    "cooldown",
+    "rsi",
+    "scalper",
+    "tsx",
+    "pnpm",
+    "dotenv",
+    "postgres",
+    "candlestick",
+    "telemetry"
+  ],
+  "eslint.workingDirectories": ["apps/bot", "apps/web", "packages/shared"],
+  "typescript.preferences.includePackageJsonAutoImports": "auto",
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  }
+}

@@ -18,6 +18,10 @@
     "jsx": "preserve",
     "incremental": true,
     "esModuleInterop": true,
+    "paths": {
+      "@scalper/shared": ["../../packages/shared/src"],
+      "@scalper/shared/*": ["../../packages/shared/src/*"]
+    },
     "plugins": [
       {
         "name": "next"

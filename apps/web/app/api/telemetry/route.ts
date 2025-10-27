@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveRuntimePath } from '../../../lib/runtime-path';
-import type { TelemetrySnapshot } from '../../../lib/types';
+import type { TelemetrySnapshot } from '@scalper/shared';
 
 export const dynamic = 'force-dynamic';
 

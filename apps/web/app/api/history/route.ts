@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
-import type { HistoryCandle, LinePoint, HistoryTimeframe } from '../../../lib/types';
+import type { HistoryCandle, LinePoint, HistoryTimeframe } from '@scalper/shared';
 
 const MAX_HOURS = 24 * 180;
 let pool: Pool | null = null;

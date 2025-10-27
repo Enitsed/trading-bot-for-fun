@@ -15,7 +15,7 @@ import type {
   RuntimeOverrides,
   RuntimeOverridesPayload,
   TelemetrySnapshot,
-} from '../lib/types';
+} from '@scalper/shared';
 
 const POLL_INTERVAL = 5000;
 const HISTORY_POLL_INTERVAL = 60000;
@@ -283,13 +283,24 @@ export default function DashboardPage(): JSX.Element {
     const position = formatNumber(snapshot.position, { fractionDigits: 6 });
     const quoteFree = formatNumber(snapshot.balances?.quoteFree, { fractionDigits: 2 });
     const baseFree = formatNumber(snapshot.balances?.baseFree, { fractionDigits: 6 });
+    const quoteCurrency = process.env.NEXT_PUBLIC_QUOTE ?? 'USDT';
+    const baseCurrency = process.env.NEXT_PUBLIC_BASE ?? 'BTC';
+
     return [
       { label: '현재가', value: price, note: snapshot.mark ? '(마크 포함)' : '' },
-      { label: '총 평가금액', value: equity },
+      { label: '총 평가금액', value: equity, note: '현금 + 코인 평가액' },
       { label: '일중 손익률', value: drawdown ? `${drawdown}%` : '-' },
-      { label: '보유 수량', value: position },
-      { label: '쿼트 잔고', value: `${quoteFree} ${process.env.NEXT_PUBLIC_QUOTE ?? 'USDT'}` },
-      { label: '베이스 잔고', value: `${baseFree} ${process.env.NEXT_PUBLIC_BASE ?? 'BTC'}` },
+      { label: '보유 수량', value: position, note: `매도 가능한 ${baseCurrency}` },
+      {
+        label: `현금 잔고 (${quoteCurrency})`,
+        value: quoteFree,
+        note: `매수에 사용할 수 있는 ${quoteCurrency} 금액`
+      },
+      {
+        label: `코인 잔고 (${baseCurrency})`,
+        value: baseFree,
+        note: `보유 중인 ${baseCurrency} 수량 (매도 시 현금 전환)`
+      },
     ];
   }, [snapshot]);
 
@@ -327,6 +338,24 @@ export default function DashboardPage(): JSX.Element {
                 {note ? <p className="note">{note}</p> : null}
               </article>
             ))}
+          </section>
+
+          <section className="balance-explanation">
+            <h3>💡 잔고 설명</h3>
+            <div className="explanation-grid">
+              <div className="explanation-item">
+                <h4>현금 잔고 ({process.env.NEXT_PUBLIC_QUOTE ?? 'USDT'})</h4>
+                <p>새로운 코인 매수에 사용되는 금액입니다. 매수 주문 시 이 잔고에서 차감됩니다.</p>
+              </div>
+              <div className="explanation-item">
+                <h4>코인 잔고 ({process.env.NEXT_PUBLIC_BASE ?? 'BTC'})</h4>
+                <p>현재 보유 중인 코인 수량입니다. 매도 주문 시 현금으로 전환됩니다.</p>
+              </div>
+              <div className="explanation-item">
+                <h4>총 평가금액</h4>
+                <p>현금 잔고 + (코인 잔고 × 현재가)로 계산된 총 자산 가치입니다.</p>
+              </div>
+            </div>
           </section>
 
           <section className="details">

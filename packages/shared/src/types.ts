@@ -83,3 +83,14 @@ export type HistoryApiResponse = {
   timeframe: HistoryTimeframe;
   error?: string;
 };
+
+export type Signal = 'BUY' | 'SELL' | 'HOLD' | 'LONG' | 'EXIT';
+
+export type Candle = {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+};

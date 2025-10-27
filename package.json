@@ -1,37 +1,20 @@
 {
-  "name": "rsi-reversion-scalper",
+  "name": "scalper",
   "version": "0.1.0",
-  "type": "module",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "build": "tsc -p apps/bot/tsconfig.json",
-    "start:live": "node apps/bot/dist/live.js",
-    "start:backtest": "node apps/bot/dist/backtest.js",
-    "dev:live": "tsx --env-file apps/bot/.env apps/bot/src/live.ts",
-    "dev:backtest": "tsx --env-file apps/bot/.env apps/bot/src/backtest.ts",
-    "dev:web": "next dev apps/web",
-    "build:web": "next build apps/web",
-    "start:web": "next start apps/web"
-  },
-  "dependencies": {
-    "ccxt": "^4.2.99",
-    "csv-parse": "^5.5.6",
-    "date-fns": "^3.6.0",
-    "dotenv": "^16.4.5",
-    "next": "^14.2.33",
-    "pg": "^8.13.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "uuid": "^9.0.1"
-  },
-  "devDependencies": {
-    "@types/node": "^22.18.10",
-    "@types/pg": "^8.15.5",
-    "@types/react": "18.2.63",
-    "@types/react-dom": "18.2.19",
-    "@types/uuid": "^9.0.7",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "dev:bot": "pnpm --filter @scalper/bot dev:live",
+    "dev:bot:backtest": "pnpm --filter @scalper/bot dev:backtest",
+    "dev:web": "pnpm --filter @scalper/web dev",
+    "build:bot": "pnpm --filter @scalper/bot build",
+    "build:web": "pnpm --filter @scalper/web build",
+    "build": "pnpm run build:bot && pnpm run build:web",
+    "start:bot": "pnpm --filter @scalper/bot start:live",
+    "start:bot:backtest": "pnpm --filter @scalper/bot start:backtest",
+    "start:web": "pnpm --filter @scalper/web start"
   }
 }

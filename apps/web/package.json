@@ -1,0 +1,25 @@
+{
+  "name": "@scalper/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@scalper/shared": "workspace:*",
+    "next": "^14.2.33",
+    "pg": "^8.13.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.10",
+    "@types/pg": "^8.15.5",
+    "@types/react": "18.2.63",
+    "@types/react-dom": "18.2.19",
+    "typescript": "^5.6.3"
+  }
+}

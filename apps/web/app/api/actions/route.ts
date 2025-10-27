@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { resolveRuntimePath } from '../../../lib/runtime-path';
-import type { ManualActionPayload, ManualActionType, ManualCommand } from '../../../lib/types';
+import type { ManualActionPayload, ManualActionType, ManualCommand } from '@scalper/shared';
 
 const RUNTIME_DIR = resolveRuntimePath();
 const COMMANDS_PATH = path.join(RUNTIME_DIR, 'commands.json');

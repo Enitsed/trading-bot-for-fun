@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveRuntimePath } from '../../../lib/runtime-path';
-import type { RuntimeOverrideKey, RuntimeOverridesPayload } from '../../../lib/types';
+import type { RuntimeOverrideKey, RuntimeOverridesPayload } from '@scalper/shared';
 
 const RUNTIME_DIR = resolveRuntimePath();
 const OVERRIDES_PATH = path.join(RUNTIME_DIR, 'overrides.json');

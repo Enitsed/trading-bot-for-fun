@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { LinePoint } from '../../lib/types';
+import type { LinePoint } from '@scalper/shared';
 
 const WIDTH = 800;
 const HEIGHT = 260;

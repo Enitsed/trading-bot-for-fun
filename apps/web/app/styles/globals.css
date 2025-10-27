@@ -404,3 +404,57 @@ header .meta {
     font-size: 1.4rem;
   }
 }
+
+/* Balance explanation section */
+.balance-explanation {
+  margin: 32px 0;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(37, 99, 235, 0.06));
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 16px;
+}
+
+.balance-explanation h3 {
+  margin: 0 0 20px;
+  color: #93c5fd;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.explanation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.explanation-item {
+  padding: 16px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(71, 85, 105, 0.3);
+  border-radius: 12px;
+}
+
+.explanation-item h4 {
+  margin: 0 0 8px;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.explanation-item p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+  .explanation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .balance-explanation {
+    margin: 24px 0;
+    padding: 16px;
+  }
+}

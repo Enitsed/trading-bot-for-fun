@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { HistoryCandle } from '../../lib/types';
+import type { HistoryCandle } from '@scalper/shared';
 
 const WIDTH = 800;
 const HEIGHT = 320;
