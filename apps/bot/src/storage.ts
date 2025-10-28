@@ -1,5 +1,5 @@
-import { Pool } from 'pg';
 import { CFG } from './config.js';
+import { sequelize, PriceTickModel, TradeEventModel } from './database.js';
 
 export type PriceTickPayload = {
   symbol: string;
@@ -34,208 +34,80 @@ export type TradeRecordPayload = {
   recordedAt?: number;
 };
 
-let pool: Pool | null = null;
-let initPromise: Promise<void> | null = null;
-let storageDisabled = false;
-let storageReady = false;
-let announcedReady = false;
-
 function pgEnabled(): boolean {
-  return CFG.pgEnable && !storageDisabled;
+  return CFG.pgEnable;
 }
 
-function getPool(): Pool | null {
-  if (!pgEnabled()) return null;
-  if (!pool) {
-    const hasUrl = CFG.pgUrl && CFG.pgUrl.length > 0;
-    pool = hasUrl
-      ? new Pool({ connectionString: CFG.pgUrl })
-      : new Pool({
-          host: CFG.pgHost,
-          port: CFG.pgPort,
-          user: CFG.pgUser,
-          password: CFG.pgPassword || undefined,
-          database: CFG.pgDatabase,
-        });
-    pool.on('error', (err: unknown) => {
-      console.error('[PG] Unexpected pool error:', err);
-    });
-  }
-  return pool;
-}
-
-async function ensureInit(): Promise<boolean> {
-  if (!pgEnabled()) return false;
-  const target = getPool();
-  if (!target) return false;
-  if (!initPromise) {
-    initPromise = (async () => {
-      const client = await target.connect();
-      try {
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS price_ticks (
-            id BIGSERIAL PRIMARY KEY,
-            symbol TEXT NOT NULL,
-            candle_at TIMESTAMPTZ NOT NULL,
-            price_open NUMERIC NOT NULL,
-            price_high NUMERIC NOT NULL,
-            price_low NUMERIC NOT NULL,
-            price_close NUMERIC NOT NULL,
-            volume NUMERIC NOT NULL,
-            signal TEXT NOT NULL,
-            position NUMERIC,
-            equity NUMERIC,
-            total_pnl NUMERIC,
-            total_pnl_pct NUMERIC,
-            event TEXT NOT NULL,
-            runtime_cfg JSONB NOT NULL DEFAULT '{}'::jsonb,
-            recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-        `);
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS trade_events (
-            id BIGSERIAL PRIMARY KEY,
-            symbol TEXT NOT NULL,
-            traded_at TIMESTAMPTZ NOT NULL,
-            side TEXT NOT NULL,
-            amount NUMERIC NOT NULL,
-            price NUMERIC NOT NULL,
-            event TEXT NOT NULL,
-            position NUMERIC,
-            equity NUMERIC,
-            order_id TEXT,
-            client_order_id TEXT,
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-        `);
-        storageReady = true;
-      } finally {
-        client.release();
-      }
-    })().catch((error) => {
-      storageDisabled = true;
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn('[PG] Storage disabled (init failed):', message);
-      throw error;
-    });
-  }
-  try {
-    await initPromise;
-    return storageReady;
-  } catch {
-    return false;
-  }
-}
+let syncPromise: Promise<void> | null = null;
 
 export async function prepareStorage(): Promise<boolean> {
   if (!CFG.pgEnable) {
     return false;
   }
-  const ready = await ensureInit();
-  if (ready && !announcedReady) {
-    console.log('[PG] Storage ready');
-    announcedReady = true;
+  if (!syncPromise) {
+    syncPromise = sequelize.sync({ alter: true });
   }
-  return ready;
+  try {
+    await syncPromise;
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('[ORM] Storage sync failed:', message);
+    return false;
+  }
 }
 
 export async function recordPriceTick(payload: PriceTickPayload): Promise<void> {
   if (!pgEnabled()) return;
-  if (!(await ensureInit())) return;
-  const target = getPool();
-  if (!target) return;
+  if (!(await prepareStorage())) return;
   const recordedAt = new Date(payload.recordedAt ?? Date.now());
   const candleAt = new Date(payload.candleTs);
   try {
-    await target.query(
-      `
-        INSERT INTO price_ticks (
-          symbol,
-          candle_at,
-          price_open,
-          price_high,
-          price_low,
-          price_close,
-          volume,
-          signal,
-          position,
-          equity,
-          total_pnl,
-          total_pnl_pct,
-          event,
-          runtime_cfg,
-          recorded_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
-      `,
-      [
-        payload.symbol,
-        candleAt,
-        payload.open,
-        payload.high,
-        payload.low,
-        payload.close,
-        payload.volume,
-        payload.signal,
-        Number.isFinite(payload.position) ? payload.position : null,
-        Number.isFinite(payload.equity) ? payload.equity : null,
-        Number.isFinite(payload.totalPnl ?? NaN) ? payload.totalPnl : null,
-        Number.isFinite(payload.totalPnlPct ?? NaN) ? payload.totalPnlPct : null,
-        payload.event,
-        payload.runtimeCfg ?? {},
-        recordedAt,
-      ]
-    );
+    await PriceTickModel.create({
+      symbol: payload.symbol,
+      candleAt,
+      priceOpen: payload.open,
+      priceHigh: payload.high,
+      priceLow: payload.low,
+      priceClose: payload.close,
+      volume: payload.volume,
+      signal: payload.signal,
+      position: Number.isFinite(payload.position) ? payload.position : null,
+      equity: Number.isFinite(payload.equity) ? payload.equity : null,
+      totalPnl: Number.isFinite(payload.totalPnl ?? NaN) ? payload.totalPnl : null,
+      totalPnlPct: Number.isFinite(payload.totalPnlPct ?? NaN) ? payload.totalPnlPct : null,
+      event: payload.event,
+      runtimeCfg: payload.runtimeCfg ?? {},
+      recordedAt,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn('[PG] Failed to record price tick:', message);
+    console.warn('[DB] Failed to record price tick:', message);
   }
 }
 
 export async function recordTrade(payload: TradeRecordPayload): Promise<void> {
   if (!pgEnabled()) return;
-  if (!(await ensureInit())) return;
-  const target = getPool();
-  if (!target) return;
+  if (!(await prepareStorage())) return;
   const tradedAt = new Date(payload.ts);
   const recordedAt = new Date(payload.recordedAt ?? Date.now());
   try {
-    await target.query(
-      `
-        INSERT INTO trade_events (
-          symbol,
-          traded_at,
-          side,
-          amount,
-          price,
-          event,
-          position,
-          equity,
-          order_id,
-          client_order_id,
-          metadata,
-          recorded_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
-      `,
-      [
-        payload.symbol,
-        tradedAt,
-        payload.side,
-        payload.amount,
-        payload.price,
-        payload.event,
-        Number.isFinite(payload.position) ? payload.position : null,
-        Number.isFinite(payload.equity) ? payload.equity : null,
-        payload.orderId ?? null,
-        payload.clientOrderId ?? null,
-        payload.metadata ?? {},
-        recordedAt,
-      ]
-    );
+    await TradeEventModel.create({
+      symbol: payload.symbol,
+      tradedAt,
+      side: payload.side,
+      amount: payload.amount,
+      price: payload.price,
+      event: payload.event,
+      position: Number.isFinite(payload.position) ? payload.position : null,
+      equity: Number.isFinite(payload.equity) ? payload.equity : null,
+      orderId: payload.orderId ?? null,
+      clientOrderId: payload.clientOrderId ?? null,
+      metadata: payload.metadata ?? {},
+      recordedAt,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn('[PG] Failed to record trade:', message);
+    console.warn('[DB] Failed to record trade:', message);
   }
 }
