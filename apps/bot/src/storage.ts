@@ -1,5 +1,5 @@
 import { CFG } from './config.js';
-import { sequelize, PriceTickModel, TradeEventModel } from './database.js';
+import { ensureDbConnection, syncModels, PriceTickModel, TradeEventModel, isUndefinedTableError, logMissingTable } from '@scalper/shared';
 
 export type PriceTickPayload = {
   symbol: string;
@@ -46,9 +46,9 @@ export async function prepareStorage(): Promise<boolean> {
   }
   if (!syncPromise) {
     syncPromise = (async () => {
-      await sequelize.authenticate();
+      await ensureDbConnection();
       if (CFG.dbAutoSync) {
-        await sequelize.sync({ alter: true });
+        await syncModels({ alter: true });
       }
     })();
   }
@@ -87,6 +87,10 @@ export async function recordPriceTick(payload: PriceTickPayload): Promise<void> 
       recordedAt,
     });
   } catch (error) {
+    if (isUndefinedTableError(error)) {
+      logMissingTable('price_ticks');
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     console.warn('[DB] Failed to record price tick:', message);
   }
@@ -113,6 +117,10 @@ export async function recordTrade(payload: TradeRecordPayload): Promise<void> {
       recordedAt,
     });
   } catch (error) {
+    if (isUndefinedTableError(error)) {
+      logMissingTable('trade_events');
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     console.warn('[DB] Failed to record trade:', message);
   }

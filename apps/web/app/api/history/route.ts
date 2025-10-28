@@ -1,17 +1,10 @@
 import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
+import { ensureDbConnection, Op, PriceTickModel, isUndefinedTableError, logMissingTable } from '@scalper/shared';
 import type { HistoryCandle, LinePoint, HistoryTimeframe } from '@scalper/shared';
 
 const MAX_HOURS = 24 * 180;
-let pool: Pool | null = null;
 
 const PG_ENABLE = (process.env.PG_ENABLE || '').toLowerCase() === 'true';
-const PG_URL = process.env.PG_URL || '';
-const PG_HOST = process.env.PG_HOST || '127.0.0.1';
-const PG_PORT = Number(process.env.PG_PORT || '5432');
-const PG_USER = process.env.PG_USER || 'postgres';
-const PG_PASSWORD = process.env.PG_PASSWORD || '';
-const PG_DATABASE = process.env.PG_DATABASE || 'scalper';
 
 const TIMEFRAME_MS: Record<HistoryTimeframe, number> = {
   '5m': 5 * 60 * 1000,
@@ -23,13 +16,13 @@ const TIMEFRAME_MS: Record<HistoryTimeframe, number> = {
 const DEFAULT_TIMEFRAME: HistoryTimeframe = '1h';
 
 type RawTick = {
-  candle_at: string;
-  price_open: string;
-  price_high: string;
-  price_low: string;
-  price_close: string;
-  volume: string;
-  equity: string | null;
+  candleAt: Date | string;
+  priceOpen: string | number;
+  priceHigh: string | number;
+  priceLow: string | number;
+  priceClose: string | number;
+  volume: string | number;
+  equity: string | number | null;
 };
 
 type Bucket = HistoryCandle & {
@@ -38,28 +31,6 @@ type Bucket = HistoryCandle & {
   equity: number | null;
   equityTs: number;
 };
-
-function ensurePool(): Pool {
-  if (!pool) {
-    if (!PG_ENABLE) {
-      throw new Error('PG_DISABLED');
-    }
-    const hasUrl = PG_URL && PG_URL.length > 0;
-    pool = hasUrl
-      ? new Pool({ connectionString: PG_URL })
-      : new Pool({
-          host: PG_HOST,
-          port: PG_PORT,
-          user: PG_USER,
-          password: PG_PASSWORD || undefined,
-          database: PG_DATABASE,
-        });
-    pool.on('error', (error) => {
-      console.error('[history] pool error', error);
-    });
-  }
-  return pool;
-}
 
 function normalizeHours(param: string | null): number {
   if (!param) return 24;
@@ -85,19 +56,25 @@ function aggregateByWindow(rows: RawTick[], windowMs: number): { candles: Histor
   const buckets = new Map<number, Bucket>();
 
   for (const row of rows) {
-    const candleTs = new Date(row.candle_at).getTime();
+    const candleTs = new Date(row.candleAt).getTime();
     if (!Number.isFinite(candleTs)) continue;
-    const open = Number(row.price_open);
-    const high = Number(row.price_high);
-    const low = Number(row.price_low);
-    const close = Number(row.price_close);
-    const volume = Number(row.volume);
-    if (![open, high, low, close, volume].every((value) => Number.isFinite(value))) {
+    const open = toFinite(row.priceOpen);
+    const high = toFinite(row.priceHigh);
+    const low = toFinite(row.priceLow);
+    const close = toFinite(row.priceClose);
+    const volume = toFinite(row.volume);
+    if (
+      !isFiniteNumber(open) ||
+      !isFiniteNumber(high) ||
+      !isFiniteNumber(low) ||
+      !isFiniteNumber(close) ||
+      !isFiniteNumber(volume)
+    ) {
       continue;
     }
     const bucketKey = quantizeToWindow(candleTs, windowMs);
     const existing = buckets.get(bucketKey);
-    const equity = row.equity !== null ? Number(row.equity) : Number.NaN;
+    const equityValue = row.equity !== null ? toFinite(row.equity) : null;
 
     if (!existing) {
       buckets.set(bucketKey, {
@@ -109,8 +86,8 @@ function aggregateByWindow(rows: RawTick[], windowMs: number): { candles: Histor
         volume,
         firstTs: candleTs,
         lastTs: candleTs,
-        equity: Number.isFinite(equity) ? equity : null,
-        equityTs: Number.isFinite(equity) ? candleTs : Number.NEGATIVE_INFINITY,
+        equity: isFiniteNumber(equityValue) ? equityValue : null,
+        equityTs: isFiniteNumber(equityValue) ? candleTs : Number.NEGATIVE_INFINITY,
       });
       continue;
     }
@@ -131,8 +108,8 @@ function aggregateByWindow(rows: RawTick[], windowMs: number): { candles: Histor
     }
     existing.volume += volume;
 
-    if (Number.isFinite(equity) && candleTs >= existing.equityTs) {
-      existing.equity = equity;
+    if (isFiniteNumber(equityValue) && candleTs >= existing.equityTs) {
+      existing.equity = equityValue;
       existing.equityTs = candleTs;
     }
   }
@@ -187,38 +164,44 @@ export async function GET(request: Request) {
   windowEnd = Math.floor(windowEnd);
 
   try {
-    const client = ensurePool();
-    const { rows } = await client.query<RawTick>(
-      `
-        SELECT candle_at, price_open, price_high, price_low, price_close, volume, equity
-        FROM price_ticks
-        WHERE candle_at >= to_timestamp($1 / 1000.0)
-          AND candle_at < to_timestamp($2 / 1000.0)
-        ORDER BY candle_at ASC
-      `,
-      [windowStart, windowEnd]
-    );
+    await ensureDbConnection();
+    const rows = (await PriceTickModel.findAll({
+      attributes: ['candleAt', 'priceOpen', 'priceHigh', 'priceLow', 'priceClose', 'volume', 'equity'],
+      where: {
+        candleAt: {
+          [Op.gte]: new Date(windowStart),
+          [Op.lt]: new Date(windowEnd),
+        },
+      },
+      order: [['candle_at', 'ASC']],
+      raw: true,
+    })) as RawTick[];
+
     const { candles, equitySeries } = aggregateByWindow(rows, windowMs);
 
     const [prevResult, nextResult] = await Promise.all([
-      client.query<{ exists: boolean }>(
-        `SELECT EXISTS (
-          SELECT 1 FROM price_ticks
-          WHERE candle_at < to_timestamp($1 / 1000.0)
-        ) AS exists;`,
-        [windowStart]
-      ),
-      client.query<{ exists: boolean }>(
-        `SELECT EXISTS (
-          SELECT 1 FROM price_ticks
-          WHERE candle_at >= to_timestamp($1 / 1000.0)
-        ) AS exists;`,
-        [windowEnd]
-      ),
+      PriceTickModel.findOne({
+        attributes: ['id'],
+        where: {
+          candleAt: {
+            [Op.lt]: new Date(windowStart),
+          },
+        },
+        order: [['candle_at', 'DESC']],
+      }),
+      PriceTickModel.findOne({
+        attributes: ['id'],
+        where: {
+          candleAt: {
+            [Op.gte]: new Date(windowEnd),
+          },
+        },
+        order: [['candle_at', 'ASC']],
+      }),
     ]);
 
-    const hasPrev = prevResult.rows[0]?.exists ?? false;
-    const hasNext = nextResult.rows[0]?.exists ?? false;
+    const hasPrev = Boolean(prevResult);
+    const hasNext = Boolean(nextResult);
 
     return NextResponse.json({
       ok: true,
@@ -231,7 +214,30 @@ export async function GET(request: Request) {
       hasNext,
     });
   } catch (error) {
+    if (isUndefinedTableError(error)) {
+      logMissingTable('price_ticks');
+      return NextResponse.json({ ok: false, error: 'DATA_UNAVAILABLE' }, { status: 503 });
+    }
     console.error('[history] query failed', error);
     return NextResponse.json({ ok: false, error: 'INTERNAL_ERROR' }, { status: 500 });
   }
+}
+
+function toFinite(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (value instanceof Date) {
+    const timestamp = value.getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isFiniteNumber(value: number | null): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }

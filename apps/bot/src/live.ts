@@ -1,11 +1,16 @@
-import path from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import type { Exchange } from 'ccxt';
 import { connect, fetchOHLCV, getPositionQty, placeMarket, quotePrecision, toAmountPrecision } from './exchange.js';
 import { rsiReversionSignals, type Candle, type Signal } from './strategy.js';
 import { sizeByRisk, computeBracket, hitBracket, withinCooldown } from './risk.js';
 import { CFG } from './config.js';
 import { prepareStorage, recordPriceTick, recordTrade } from './storage.js';
+import {
+  fetchPendingCommands,
+  getRuntimeOverrides,
+  markCommandsProcessed,
+  saveTelemetrySnapshot,
+} from '@scalper/shared';
+import type { TelemetrySnapshot, ManualActionType } from '@scalper/shared';
 
 type BalanceSnapshot = {
   quoteFree: number;
@@ -30,6 +35,8 @@ type Snapshot = {
   };
   equity: number;
   drawdown: number;
+  totalPnl?: number;
+  totalPnlPct?: number;
   mark: number;
   balances: BalanceSnapshot;
   lastTradeTs: number | null;
@@ -49,15 +56,7 @@ type RuntimeCfg = {
 
 type RuntimeOverrides = Partial<RuntimeCfg>;
 
-type Command =
-  | { id: string; type: 'manual-buy'; amount?: number; createdAt: number }
-  | { id: string; type: 'manual-sell'; amount?: number; createdAt: number }
-  | { id: string; type: 'flatten'; createdAt: number };
-
-const RUNTIME_DIR = path.resolve(process.cwd(), 'runtime');
-const SNAPSHOT_PATH = path.join(RUNTIME_DIR, 'telemetry.json');
-const OVERRIDES_PATH = path.join(RUNTIME_DIR, 'overrides.json');
-const COMMANDS_PATH = path.join(RUNTIME_DIR, 'commands.json');
+type Command = { id: string; type: ManualActionType; amount?: number | null; createdAt: number };
 
 const DEFAULT_RUNTIME_CFG: RuntimeCfg = {
   rsiLen: CFG.rsiLen,
@@ -93,18 +92,6 @@ function extractOrderDetails(order: OrderResult | null | undefined): OrderDetail
   return info ? { orderId, clientOrderId, info } : { orderId, clientOrderId };
 }
 
-async function readJsonFile<T>(filePath: string): Promise<T | null> {
-  try {
-    const raw = await readFile(filePath, 'utf8');
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException)?.code;
-    if (code === 'ENOENT') return null;
-    console.warn(`[IO] ${filePath} read failed:`, error);
-    return null;
-  }
-}
-
 function resolveRuntimeCfg(overrides: RuntimeOverrides | null | undefined): RuntimeCfg {
   if (!overrides) return { ...DEFAULT_RUNTIME_CFG };
   return {
@@ -129,20 +116,43 @@ function resolveRuntimeCfg(overrides: RuntimeOverrides | null | undefined): Runt
 }
 
 async function loadOverrides(): Promise<RuntimeOverrides | null> {
-  return readJsonFile<RuntimeOverrides>(OVERRIDES_PATH);
+  const overrides = await getRuntimeOverrides();
+  return Object.keys(overrides).length > 0 ? overrides : null;
 }
 
 async function consumeCommands(): Promise<Command[]> {
-  const list = await readJsonFile<Command[]>(COMMANDS_PATH);
-  if (!Array.isArray(list) || list.length === 0) return [];
-  await mkdir(RUNTIME_DIR, { recursive: true });
-  await writeFile(COMMANDS_PATH, '[]');
-  return list;
+  const rows = await fetchPendingCommands();
+  if (!rows.length) return [];
+  await markCommandsProcessed(rows.map((row) => row.id));
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type as ManualActionType,
+    amount: row.amount ?? undefined,
+    createdAt: row.createdAt.getTime(),
+  }));
 }
 
 async function writeSnapshot(snapshot: Snapshot) {
-  await mkdir(RUNTIME_DIR, { recursive: true });
-  await writeFile(SNAPSHOT_PATH, JSON.stringify(snapshot));
+  const payload: TelemetrySnapshot = {
+    timestamp: snapshot.timestamp,
+    price: snapshot.price,
+    signal: snapshot.signal,
+    recentSignals: snapshot.recentSignals,
+    position: snapshot.position,
+    entryPrice: snapshot.entryPrice,
+    openBracket: snapshot.openBracket,
+    thresholds: snapshot.thresholds,
+    equity: snapshot.equity,
+    drawdown: snapshot.drawdown,
+    totalPnl: snapshot.totalPnl ?? 0,
+    totalPnlPct: snapshot.totalPnlPct ?? 0,
+    mark: snapshot.mark,
+    balances: snapshot.balances,
+    lastTradeTs: snapshot.lastTradeTs,
+    event: snapshot.event,
+    runtimeCfg: snapshot.runtimeCfg,
+  };
+  await saveTelemetrySnapshot(payload);
 }
 
 async function handleCommand(

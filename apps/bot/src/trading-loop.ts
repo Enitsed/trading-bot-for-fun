@@ -1,5 +1,5 @@
 import type { Exchange, OHLCV } from 'ccxt';
-import { botLogger, type Candle as SharedCandle, type Signal } from '@scalper/shared';
+import { botLogger, type Candle as SharedCandle, type Signal, getRuntimeOverrides } from '@scalper/shared';
 import {
   connect,
   fetchOHLCV,
@@ -268,9 +268,22 @@ export async function executeTradingLoop(): Promise<void> {
 }
 
 async function loadRuntimeConfig(): Promise<RuntimeCfg> {
-  // This would load from runtime overrides file
-  // For now, return default config
-  return getDefaultRuntimeConfig();
+  try {
+    const overrides = await getRuntimeOverrides();
+    return {
+      rsiLen: overrides.rsiLen ?? CFG.rsiLen,
+      rsiEntry: overrides.rsiEntry ?? CFG.rsiEntry,
+      rsiExit: overrides.rsiExit ?? CFG.rsiExit,
+      riskPerTrade: overrides.riskPerTrade ?? CFG.riskPerTrade,
+      stopPct: overrides.stopPct ?? CFG.stopPct,
+      takePct: overrides.takePct ?? CFG.takePct,
+      cooldownMin: overrides.cooldownMin ?? CFG.cooldownMin,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await botLogger.warn(`Failed to load overrides: ${message}`, 'CONFIG');
+    return getDefaultRuntimeConfig();
+  }
 }
 
 function getDefaultRuntimeConfig(): RuntimeCfg {

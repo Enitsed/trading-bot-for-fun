@@ -1,7 +1,5 @@
-import path from 'node:path';
-import { writeFile } from 'node:fs/promises';
 import type { Signal, Candle } from '@scalper/shared';
-import { botLogger } from '@scalper/shared';
+import { botLogger, saveTelemetrySnapshot } from '@scalper/shared';
 import type { BalanceSnapshot } from './balance.js';
 import { CFG } from './config.js';
 
@@ -88,8 +86,7 @@ export async function publishSnapshot(params: PublishParams): Promise<void> {
   };
 
   try {
-    const telemetryPath = path.join(CFG.runtimeDir, 'telemetry.json');
-    await writeFile(telemetryPath, JSON.stringify(snapshot));
+    await saveTelemetrySnapshot(snapshot);
   } catch (error) {
     const message = error instanceof Error ? error.message : JSON.stringify(error);
     await botLogger.error(`Failed to write telemetry: ${message}`, 'TELEMETRY');

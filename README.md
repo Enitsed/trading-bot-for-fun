@@ -55,7 +55,7 @@ apps/
     app/
     next.config.mjs
     tsconfig.next.json
-runtime/        # 봇과 대시보드가 공유하는 런타임 파일 (telemetry, commands 등)
+runtime/        # (레거시) 파일 기반 텔레메트리 저장소, Postgres 사용 시 비워둡니다
 .env             # 실행에 사용하는 통합 환경변수 (선택)
 ```
 
@@ -63,6 +63,7 @@ runtime/        # 봇과 대시보드가 공유하는 런타임 파일 (telemetr
 - 라이브 봇은 `PG_ENABLE=true`일 때 각 루프에서 최신 호가 스냅샷을 `price_ticks` 테이블에 저장하고, 마켓 주문이 체결되면 `trade_events` 테이블에 체결 메타데이터(사이드, 수량, 이벤트, 주문 ID 등)를 기록합니다.
 - 연결은 `PG_URL` 또는 `PG_HOST`/`PG_PORT`/`PG_USER`/`PG_PASSWORD`/`PG_DATABASE` 환경변수로 구성할 수 있습니다.
 - 로깅 실패는 트레이딩 루프를 중단시키지 않으며, 초기화에 실패하면 로그는 자동으로 비활성화됩니다.
+- API 계층은 테이블이 아직 생성되지 않은 경우 `DATA_UNAVAILABLE`/`DB_TABLE_MISSING`을 반환합니다. 최초 셋업 시 `DB_AUTO_SYNC=true`로 한 번 동기화하거나 마이그레이션 스크립트를 실행한 뒤 플래그를 해제하세요.
 
 ## 튜닝 팁
 - 과매도 진입 기준은 `RSI_ENTRY`를 25–35, 평균회귀 청산 기준은 `RSI_EXIT`을 45–55 정도로 조정

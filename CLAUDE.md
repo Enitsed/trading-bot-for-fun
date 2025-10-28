@@ -84,6 +84,6 @@ ccxt를 사용하여 CSV 데이터로 백테스트하고 Binance/Upbit에서 실
 
 ## 중요한 파일
 
-- `runtime/` - 봇과 대시보드 간 공유 텔레메트리 및 명령 파일
+- `runtime/` - (레거시) 파일 기반 텔레메트리/명령 저장소, 현재는 Postgres 기반 공유
 - `AGENTS.md` - 상세한 코딩 가이드라인 및 규칙 포함
 - 두 애플리케이션 모두 별도의 TypeScript 설정 (`tsconfig.json`, `tsconfig.next.json`)
