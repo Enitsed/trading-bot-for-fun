@@ -65,6 +65,45 @@ type PublishParams = {
 };
 
 export async function publishSnapshot(params: PublishParams): Promise<void> {
+  if (params.event.startsWith('error:')) {
+    await botLogger.warn(`Skipping telemetry snapshot due to error event: ${params.event}`, 'TELEMETRY');
+    return;
+  }
+
+  const numericFields = [
+    params.price,
+    params.candleTs,
+    params.position,
+    params.entryPrice,
+    params.openBracket?.stop ?? 0,
+    params.openBracket?.take ?? 0,
+    params.thresholds.baseMin,
+    params.thresholds.baseStep,
+    params.thresholds.notionalMin,
+    params.thresholds.tradable,
+    params.equity,
+    params.drawdown,
+    params.totalPnl,
+    params.totalPnlPct,
+    params.mark,
+    params.balances.quoteFree,
+    params.balances.quoteTotal,
+    params.balances.baseFree,
+    params.balances.baseTotal,
+    params.runtimeCfg.rsiLen,
+    params.runtimeCfg.rsiEntry,
+    params.runtimeCfg.rsiExit,
+    params.runtimeCfg.riskPerTrade,
+    params.runtimeCfg.stopPct,
+    params.runtimeCfg.takePct,
+    params.runtimeCfg.cooldownMin,
+  ];
+
+  if (numericFields.some((value) => !Number.isFinite(value))) {
+    await botLogger.warn('Skipping telemetry snapshot due to non-finite numeric values', 'TELEMETRY');
+    return;
+  }
+
   const snapshot: Snapshot = {
     timestamp: params.candleTs,
     price: params.price,
