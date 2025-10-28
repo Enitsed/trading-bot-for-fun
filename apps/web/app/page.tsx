@@ -62,6 +62,11 @@ type DashboardCard = {
 
 type TabKey = 'overview' | 'charts' | 'controls';
 
+type HistoryCursor = {
+  start: number | null;
+  end: number | null;
+};
+
 function formatNumber(value: number | null | undefined, options: FormatNumberOptions = {}): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
   const { fractionDigits = 2 } = options;
@@ -105,6 +110,13 @@ export default function DashboardPage(): JSX.Element {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [equitySeries, setEquitySeries] = useState<LinePoint[]>([]);
   const [historyTf, setHistoryTf] = useState<HistoryTimeframe>(DEFAULT_TIMEFRAME);
+  const [historyCursor, setHistoryCursor] = useState<HistoryCursor>({ start: null, end: null });
+  const [historyWindow, setHistoryWindow] = useState<{
+    start: number;
+    end: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  } | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
 
   const fetchSnapshot = async (): Promise<void> => {
@@ -142,6 +154,8 @@ export default function DashboardPage(): JSX.Element {
         const option = TIMEFRAME_OPTIONS.find((item) => item.key === historyTf);
         const hoursParam = option?.hours ?? TIMEFRAME_OPTIONS[0].hours;
         const params = new URLSearchParams({ hours: String(hoursParam), tf: historyTf });
+        if (historyCursor.start !== null) params.set('start', String(historyCursor.start));
+        if (historyCursor.end !== null) params.set('end', String(historyCursor.end));
         const res = await fetch(`/api/history?${params.toString()}`, { cache: 'no-store' });
         if (!res.ok) {
           throw new Error(`요청 실패: ${res.status}`);
@@ -152,10 +166,18 @@ export default function DashboardPage(): JSX.Element {
         }
         if (body.timeframe && body.timeframe !== historyTf) {
           setHistoryTf(body.timeframe);
+          setHistoryCursor({ start: null, end: null });
+          setHistoryWindow(null);
           return;
         }
         setHistoryCandles(body.candles ?? []);
         setEquitySeries(body.equity ?? []);
+        setHistoryWindow({
+          start: body.windowStart,
+          end: body.windowEnd,
+          hasPrev: body.hasPrev,
+          hasNext: body.hasNext,
+        });
         setHistoryStatus('ready');
         setHistoryError(null);
       } catch (err) {
@@ -164,13 +186,19 @@ export default function DashboardPage(): JSX.Element {
         setHistoryError(err instanceof Error ? err.message : String(err));
         setHistoryCandles([]);
         setEquitySeries([]);
+        setHistoryWindow(null);
       }
     };
 
     fetchHistory();
-    const id = setInterval(fetchHistory, HISTORY_POLL_INTERVAL);
-    return () => clearInterval(id);
-  }, [historyTf]);
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    if (historyCursor.start === null && historyCursor.end === null) {
+      intervalId = setInterval(fetchHistory, HISTORY_POLL_INTERVAL);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [historyTf, historyCursor]);
 
   useEffect(() => {
     const bootstrapSettings = async (): Promise<void> => {
@@ -274,6 +302,48 @@ export default function DashboardPage(): JSX.Element {
 
   const historyRangeHours = activeTimeframe.hours;
   const timeframeLabel = activeTimeframe.label;
+  const viewingLatest = historyCursor.start === null && historyCursor.end === null;
+
+  const handleTimeframeSelect = (tf: HistoryTimeframe) => {
+    if (tf === historyTf) return;
+    setHistoryTf(tf);
+    setHistoryCursor({ start: null, end: null });
+    setHistoryWindow(null);
+  };
+
+  const deriveRangeMs = () => {
+    if (historyWindow) {
+      const span = historyWindow.end - historyWindow.start;
+      if (span > 0) return span;
+    }
+    return historyRangeHours * 60 * 60 * 1000;
+  };
+
+  const handlePrevRange = () => {
+    if (!historyWindow) return;
+    const range = deriveRangeMs();
+    const nextEnd = historyWindow.start;
+    const nextStart = Math.max(nextEnd - range, 0);
+    setHistoryCursor({ start: nextStart, end: nextEnd });
+  };
+
+  const handleNextRange = () => {
+    if (!historyWindow || !historyWindow.hasNext) return;
+    const range = deriveRangeMs();
+    const nextStart = historyWindow.end;
+    const nextEnd = nextStart + range;
+    setHistoryCursor({ start: nextStart, end: nextEnd });
+  };
+
+  const handleResetRange = () => {
+    if (viewingLatest) return;
+    setHistoryCursor({ start: null, end: null });
+  };
+
+  const historyRangeLabel = useMemo(() => {
+    if (!historyWindow) return '-';
+    return `${formatTimestamp(historyWindow.start)} ~ ${formatTimestamp(historyWindow.end)}`;
+  }, [historyWindow]);
 
   const cards = useMemo<DashboardCard[]>(() => {
     if (!snapshot) return [];
@@ -428,12 +498,29 @@ export default function DashboardPage(): JSX.Element {
             key={key}
             type="button"
             className={key === historyTf ? 'active' : ''}
-            onClick={() => setHistoryTf(key)}
+            onClick={() => handleTimeframeSelect(key)}
           >
             {label}
           </button>
         ))}
       </div>
+
+      {historyWindow && (
+        <div className="range-meta">
+          <span className="range-label">{historyRangeLabel}</span>
+          <div className="range-actions">
+            <button type="button" onClick={handlePrevRange} disabled={!historyWindow.hasPrev}>
+              이전 기간
+            </button>
+            <button type="button" onClick={handleResetRange} disabled={viewingLatest}>
+              최근 보기
+            </button>
+            <button type="button" onClick={handleNextRange} disabled={!historyWindow.hasNext}>
+              다음 기간
+            </button>
+          </div>
+        </div>
+      )}
 
       {historyStatus === 'loading' && <p className="notice">차트를 준비하는 중입니다…</p>}
       {historyStatus === 'error' && (

@@ -81,6 +81,10 @@ export type HistoryApiResponse = {
   candles: HistoryCandle[];
   equity: LinePoint[];
   timeframe: HistoryTimeframe;
+  windowStart: number;
+  windowEnd: number;
+  hasPrev: boolean;
+  hasNext: boolean;
   error?: string;
 };
 

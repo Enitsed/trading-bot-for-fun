@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { CFG } from './config.js';
 
-type PriceTickPayload = {
+export type PriceTickPayload = {
   symbol: string;
   candleTs: number;
   open: number;
@@ -17,7 +17,7 @@ type PriceTickPayload = {
   recordedAt?: number;
 };
 
-type TradeRecordPayload = {
+export type TradeRecordPayload = {
   symbol: string;
   ts: number;
   side: 'buy' | 'sell';
@@ -55,7 +55,7 @@ function getPool(): Pool | null {
           password: CFG.pgPassword || undefined,
           database: CFG.pgDatabase,
         });
-    pool.on('error', (err) => {
+    pool.on('error', (err: unknown) => {
       console.error('[PG] Unexpected pool error:', err);
     });
   }

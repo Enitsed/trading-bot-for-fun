@@ -1,5 +1,5 @@
 import { executeTradingLoop } from './trading-loop.js';
-import { botLogger } from '../../../packages/shared/logger.js';
+import { botLogger } from '@scalper/shared';
 
 async function main(): Promise<void> {
   await botLogger.info('RSI Reversion Scalper Bot starting...', 'MAIN');

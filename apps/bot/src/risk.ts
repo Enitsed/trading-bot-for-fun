@@ -1,7 +1,7 @@
 import type { Candle } from './strategy.js';
 import { CFG } from './config.js';
 
-export type Bracket = { stop?: number; take?: number }; // 손절/익절 가격을 담는 구조
+export type Bracket = { stop: number; take: number }; // 손절/익절 가격을 담는 구조
 
 // 총 평가금액과 가격을 이용해 위험 비율에 맞는 포지션 크기 계산
 export function sizeByRisk(equityQuote: number, price: number, riskPerTrade = CFG.riskPerTrade): number {

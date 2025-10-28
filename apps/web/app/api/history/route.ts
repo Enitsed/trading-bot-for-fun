@@ -147,6 +147,16 @@ function aggregateByWindow(rows: RawTick[], windowMs: number): { candles: Histor
   return { candles, equitySeries };
 }
 
+function parseTimestamp(param: string | null): number | null {
+  if (!param) return null;
+  if (/^\d+$/.test(param)) {
+    const value = Number(param);
+    return Number.isFinite(value) ? value : null;
+  }
+  const date = new Date(param);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
 export async function GET(request: Request) {
   if (!PG_ENABLE) {
     return NextResponse.json({ ok: false, error: 'PG_DISABLED' }, { status: 503 });
@@ -156,6 +166,25 @@ export async function GET(request: Request) {
   const hours = normalizeHours(url.searchParams.get('hours'));
   const timeframe = resolveTimeframe(url.searchParams.get('tf'));
   const windowMs = TIMEFRAME_MS[timeframe];
+  const endParam = parseTimestamp(url.searchParams.get('end'));
+  const startParam = parseTimestamp(url.searchParams.get('start'));
+
+  let windowEnd = endParam ?? Date.now();
+  let windowStart = startParam ?? windowEnd - hours * 60 * 60 * 1000;
+
+  if (windowStart >= windowEnd) {
+    windowStart = windowEnd - hours * 60 * 60 * 1000;
+  }
+  if (windowStart < 0) {
+    windowStart = 0;
+  }
+  const maxRangeMs = MAX_HOURS * 60 * 60 * 1000;
+  if (windowEnd - windowStart > maxRangeMs) {
+    windowStart = windowEnd - maxRangeMs;
+  }
+
+  windowStart = Math.floor(windowStart);
+  windowEnd = Math.floor(windowEnd);
 
   try {
     const client = ensurePool();
@@ -163,13 +192,44 @@ export async function GET(request: Request) {
       `
         SELECT candle_at, price_open, price_high, price_low, price_close, volume, equity
         FROM price_ticks
-        WHERE candle_at >= NOW() - ($1::int * INTERVAL '1 hour')
+        WHERE candle_at >= to_timestamp($1 / 1000.0)
+          AND candle_at < to_timestamp($2 / 1000.0)
         ORDER BY candle_at ASC
       `,
-      [hours]
+      [windowStart, windowEnd]
     );
     const { candles, equitySeries } = aggregateByWindow(rows, windowMs);
-    return NextResponse.json({ ok: true, timeframe, candles, equity: equitySeries });
+
+    const [prevResult, nextResult] = await Promise.all([
+      client.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+          SELECT 1 FROM price_ticks
+          WHERE candle_at < to_timestamp($1 / 1000.0)
+        ) AS exists;`,
+        [windowStart]
+      ),
+      client.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+          SELECT 1 FROM price_ticks
+          WHERE candle_at >= to_timestamp($1 / 1000.0)
+        ) AS exists;`,
+        [windowEnd]
+      ),
+    ]);
+
+    const hasPrev = prevResult.rows[0]?.exists ?? false;
+    const hasNext = nextResult.rows[0]?.exists ?? false;
+
+    return NextResponse.json({
+      ok: true,
+      timeframe,
+      candles,
+      equity: equitySeries,
+      windowStart,
+      windowEnd,
+      hasPrev,
+      hasNext,
+    });
   } catch (error) {
     console.error('[history] query failed', error);
     return NextResponse.json({ ok: false, error: 'INTERNAL_ERROR' }, { status: 500 });

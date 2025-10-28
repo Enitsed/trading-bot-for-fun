@@ -263,6 +263,41 @@ header .meta {
   color: #f5f7fb;
 }
 
+.range-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.range-meta .range-label {
+  color: #cbd5f5;
+  font-size: 0.95rem;
+}
+
+.range-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.range-actions button {
+  background: rgba(24, 32, 52, 0.7);
+  border: 1px solid rgba(148, 163, 230, 0.25);
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: #cbd5f5;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.range-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 @media (max-width: 960px) {
   .tab-layout {
     grid-template-columns: 1fr;

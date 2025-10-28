@@ -1,9 +1,10 @@
 import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
-import type { Signal, Candle } from '../../../packages/shared/types.js';
+import { fileURLToPath } from 'node:url';
+import type { Signal, Candle } from '@scalper/shared';
+import { botLogger } from '@scalper/shared';
 import type { BalanceSnapshot } from './balance.js';
 import { CFG } from './config.js';
-import { botLogger } from '../../../packages/shared/logger.js';
 
 export type Snapshot = {
   timestamp: number;
@@ -82,7 +83,11 @@ export async function publishSnapshot(params: PublishParams): Promise<void> {
   };
 
   try {
-    const telemetryPath = path.resolve(CFG.runtimeDir, 'telemetry.json');
+    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+    const runtimeDir = process.env.RUNTIME_DIR
+      ? path.resolve(process.env.RUNTIME_DIR)
+      : path.resolve(moduleDir, '..', '..', '..', 'runtime');
+    const telemetryPath = path.join(runtimeDir, 'telemetry.json');
     await writeFile(telemetryPath, JSON.stringify(snapshot));
   } catch (error) {
     const message = error instanceof Error ? error.message : JSON.stringify(error);

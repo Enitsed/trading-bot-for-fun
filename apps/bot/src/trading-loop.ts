@@ -1,5 +1,5 @@
-import type { Exchange } from 'ccxt';
-import { botLogger, type Candle, type Signal } from '@scalper/shared';
+import type { Exchange, OHLCV } from 'ccxt';
+import { botLogger, type Candle as SharedCandle, type Signal } from '@scalper/shared';
 import {
   connect,
   fetchOHLCV,
@@ -8,9 +8,9 @@ import {
   quotePrecision,
   toAmountPrecision,
 } from './exchange.js';
-import { rsiReversionSignals } from './strategy.js';
+import { rsiReversionSignals, type Candle as StrategyCandle } from './strategy.js';
 import { sizeByRisk, computeBracket, hitBracket, withinCooldown } from './risk.js';
-import { prepareStorage, recordPriceTick, recordTrade } from './storage.js';
+import { prepareStorage, recordPriceTick, recordTrade, type PriceTickPayload, type TradeRecordPayload } from './storage.js';
 import { calculateEquity } from './balance.js';
 import { publishSnapshot, type RuntimeCfg } from './telemetry.js';
 import { CFG } from './config.js';
@@ -32,10 +32,12 @@ export async function executeTradingLoop(): Promise<void> {
 
   while (true) {
     try {
-      const [candles, runtimeCfg] = await Promise.all([
+      const [rawCandles, runtimeCfg] = await Promise.all([
         fetchOHLCV(exchange, maxCandles),
         loadRuntimeConfig(),
       ]);
+
+      const candles = mapCandles(rawCandles);
 
       if (candles.length === 0) {
         await botLogger.warn('No candle data available', 'LOOP');
@@ -44,61 +46,59 @@ export async function executeTradingLoop(): Promise<void> {
       }
 
       const latestCandle = candles[candles.length - 1];
-      const latestTs = latestCandle.timestamp;
+      const latestSharedCandle: SharedCandle = toSharedCandle(latestCandle);
+      const latestTs = latestCandle.ts;
       const latestPrice = latestCandle.close;
 
-      signals = rsiReversionSignals(
-        candles,
-        runtimeCfg.rsiLen,
-        runtimeCfg.rsiEntry,
-        runtimeCfg.rsiExit
-      );
+      signals = rsiReversionSignals(candles, {
+        rsiLen: runtimeCfg.rsiLen,
+        entry: runtimeCfg.rsiEntry,
+        exit: runtimeCfg.rsiExit,
+      });
       const latestSignal = signals[signals.length - 1] ?? 'HOLD';
 
-      const currentPosition = await getPositionQty(exchange);
+      let position = await getPositionQty(exchange);
       const { equity, balances, mark } = await calculateEquity(exchange);
 
       equityHwm = Math.max(equityHwm, equity);
       const drawdown = equityHwm > 0 ? (equity - equityHwm) / equityHwm : 0;
 
+      const precision = await quotePrecision(exchange);
       const thresholds = {
-        baseMin: exchange.market(CFG.symbol)?.limits?.amount?.min ?? 0,
-        baseStep: exchange.market(CFG.symbol)?.precision?.amount ?? 0,
-        notionalMin: exchange.market(CFG.symbol)?.limits?.cost?.min ?? 0,
-        tradable: await quotePrecision(exchange),
+        baseMin: precision.baseMin,
+        baseStep: precision.baseStep,
+        notionalMin: precision.notionalMin,
+        tradable: precision.baseMin,
       };
-
-      await recordPriceTick({
-        candle: latestCandle,
-        equity,
-        drawdown,
-        signal: latestSignal,
-        position: currentPosition,
-        entryPrice,
-        openBracket,
-      });
 
       let event = 'idle';
 
-      if (openBracket && hitBracket(latestPrice, openBracket)) {
-        await botLogger.info(`Bracket hit at price ${latestPrice}`, 'TRADE');
+      const bracketHit = openBracket ? hitBracket(latestPrice, openBracket) : null;
+      if (openBracket && bracketHit) {
+        await botLogger.info(`Bracket hit (${bracketHit}) at price ${latestPrice}`, 'TRADE');
 
-        if (Math.abs(currentPosition) > thresholds.baseMin) {
-          const closeSide = currentPosition > 0 ? 'sell' : 'buy';
-          const closeQty = Math.abs(currentPosition);
+        if (Math.abs(position) > thresholds.baseMin) {
+          const closeSide = position > 0 ? 'sell' : 'buy';
+          const closeQty = Math.abs(position);
 
           try {
             const order = await placeMarket(exchange, closeSide, closeQty);
-            await recordTrade({
+            position = 0;
+            const tradePayload: TradeRecordPayload = {
               side: closeSide,
-              qty: closeQty,
+              amount: closeQty,
               price: latestPrice,
               event: 'bracket',
               orderId: order?.id,
-            });
+              symbol: CFG.symbol,
+              ts: Date.now(),
+              position,
+              equity,
+            };
+            await recordTrade(tradePayload);
 
             lastTradeTs = Date.now();
-            event = closeSide === 'sell' ? 'take-profit' : 'stop-loss';
+            event = bracketHit === 'TAKE' ? 'take-profit' : 'stop-loss';
             await botLogger.info(`Position closed via bracket: ${closeSide} ${closeQty}`, 'TRADE');
           } catch (error) {
             const message = error instanceof Error ? error.message : JSON.stringify(error);
@@ -113,33 +113,38 @@ export async function executeTradingLoop(): Promise<void> {
       const isLongSignal = latestSignal === 'LONG' || latestSignal === 'BUY';
       const isExitSignal = latestSignal === 'EXIT' || latestSignal === 'SELL';
 
-      if (isLongSignal && Math.abs(currentPosition) < thresholds.baseMin) {
+      if (isLongSignal && Math.abs(position) < thresholds.baseMin) {
         if (withinCooldown(lastTradeTs, runtimeCfg.cooldownMin)) {
           await botLogger.info('Trade skipped due to cooldown', 'COOLDOWN');
         } else {
-          const tradeSize = sizeByRisk(
-            equity,
-            latestPrice,
-            runtimeCfg.riskPerTrade,
-            runtimeCfg.stopPct
-          );
+          const tradeSize = sizeByRisk(equity, latestPrice, runtimeCfg.riskPerTrade);
           const buyQty = await toAmountPrecision(exchange, tradeSize);
 
           if (buyQty >= thresholds.baseMin && buyQty * latestPrice >= thresholds.notionalMin) {
             try {
               const order = await placeMarket(exchange, 'buy', buyQty);
               entryPrice = latestPrice;
-              openBracket = computeBracket(entryPrice, runtimeCfg.stopPct, runtimeCfg.takePct);
+              openBracket = computeBracket(entryPrice, {
+                stopPct: runtimeCfg.stopPct,
+                takePct: runtimeCfg.takePct,
+              });
               lastTradeTs = Date.now();
               event = 'buy';
 
-              await recordTrade({
+              position += buyQty;
+              const tradePayload: TradeRecordPayload = {
                 side: 'buy',
-                qty: buyQty,
+                amount: buyQty,
                 price: latestPrice,
                 event: 'signal',
                 orderId: order?.id,
-              });
+                symbol: CFG.symbol,
+                ts: Date.now(),
+                position,
+                equity,
+              };
+
+              await recordTrade(tradePayload);
 
               await botLogger.info(`Long position opened: ${buyQty} at ${latestPrice}`, 'TRADE');
             } catch (error) {
@@ -150,8 +155,8 @@ export async function executeTradingLoop(): Promise<void> {
         }
       }
 
-      if (isExitSignal && Math.abs(currentPosition) > thresholds.baseMin) {
-        const closeQty = Math.abs(currentPosition);
+      if (isExitSignal && Math.abs(position) > thresholds.baseMin) {
+        const closeQty = Math.abs(position);
 
         try {
           const order = await placeMarket(exchange, 'sell', closeQty);
@@ -160,13 +165,20 @@ export async function executeTradingLoop(): Promise<void> {
           lastTradeTs = Date.now();
           event = 'exit';
 
-          await recordTrade({
+          position = 0;
+          const tradePayload: TradeRecordPayload = {
             side: 'sell',
-            qty: closeQty,
+            amount: closeQty,
             price: latestPrice,
             event: 'signal',
             orderId: order?.id,
-          });
+            symbol: CFG.symbol,
+            ts: Date.now(),
+            position,
+            equity,
+          };
+
+          await recordTrade(tradePayload);
 
           await botLogger.info(`Position closed via signal: sell ${closeQty}`, 'TRADE');
         } catch (error) {
@@ -175,11 +187,28 @@ export async function executeTradingLoop(): Promise<void> {
         }
       }
 
+      const priceTickPayload: PriceTickPayload = {
+        symbol: CFG.symbol,
+        candleTs: latestSharedCandle.timestamp,
+        open: latestSharedCandle.open,
+        high: latestSharedCandle.high,
+        low: latestSharedCandle.low,
+        close: latestSharedCandle.close,
+        volume: latestSharedCandle.volume,
+        signal: latestSignal,
+        position,
+        equity,
+        event,
+        runtimeCfg,
+      };
+
+      await recordPriceTick(priceTickPayload);
+
       await publishSnapshot({
         price: latestPrice,
         signal: latestSignal,
         signals,
-        position: currentPosition,
+        position,
         entryPrice,
         openBracket,
         thresholds,
@@ -191,7 +220,7 @@ export async function executeTradingLoop(): Promise<void> {
         event,
         runtimeCfg,
         candleTs: latestTs,
-        candle: latestCandle,
+        candle: latestSharedCandle,
       });
 
       await sleep(loopIntervalMs);
@@ -243,4 +272,26 @@ function getDefaultRuntimeConfig(): RuntimeCfg {
 
 function sleep(ms: number): Promise<void> {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function mapCandles(raw: OHLCV[]): StrategyCandle[] {
+  return raw.map(([ts, open, high, low, close, volume]) => ({
+    ts: typeof ts === 'number' ? ts : Date.now(),
+    open: typeof open === 'number' ? open : 0,
+    high: typeof high === 'number' ? high : 0,
+    low: typeof low === 'number' ? low : 0,
+    close: typeof close === 'number' ? close : 0,
+    vol: typeof volume === 'number' ? volume : 0,
+  }));
+}
+
+function toSharedCandle(candle: StrategyCandle): SharedCandle {
+  return {
+    timestamp: candle.ts,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+    volume: candle.vol,
+  };
 }
