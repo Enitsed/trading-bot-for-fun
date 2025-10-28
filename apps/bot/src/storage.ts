@@ -45,14 +45,20 @@ export async function prepareStorage(): Promise<boolean> {
     return false;
   }
   if (!syncPromise) {
-    syncPromise = sequelize.sync({ alter: true });
+    syncPromise = (async () => {
+      await sequelize.authenticate();
+      if (CFG.dbAutoSync) {
+        await sequelize.sync({ alter: true });
+      }
+    })();
   }
   try {
     await syncPromise;
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn('[ORM] Storage sync failed:', message);
+    console.warn('[DB] Storage initialization failed:', message);
+    syncPromise = null;
     return false;
   }
 }
