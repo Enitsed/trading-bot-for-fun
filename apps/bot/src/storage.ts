@@ -12,6 +12,8 @@ export type PriceTickPayload = {
   signal: string;
   position: number;
   equity: number;
+  totalPnl?: number;
+  totalPnlPct?: number;
   event: string;
   runtimeCfg?: Record<string, unknown>;
   recordedAt?: number;
@@ -83,6 +85,8 @@ async function ensureInit(): Promise<boolean> {
             signal TEXT NOT NULL,
             position NUMERIC,
             equity NUMERIC,
+            total_pnl NUMERIC,
+            total_pnl_pct NUMERIC,
             event TEXT NOT NULL,
             runtime_cfg JSONB NOT NULL DEFAULT '{}'::jsonb,
             recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -157,11 +161,13 @@ export async function recordPriceTick(payload: PriceTickPayload): Promise<void> 
           signal,
           position,
           equity,
+          total_pnl,
+          total_pnl_pct,
           event,
           runtime_cfg,
           recorded_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
       `,
       [
         payload.symbol,
@@ -174,6 +180,8 @@ export async function recordPriceTick(payload: PriceTickPayload): Promise<void> 
         payload.signal,
         Number.isFinite(payload.position) ? payload.position : null,
         Number.isFinite(payload.equity) ? payload.equity : null,
+        Number.isFinite(payload.totalPnl ?? NaN) ? payload.totalPnl : null,
+        Number.isFinite(payload.totalPnlPct ?? NaN) ? payload.totalPnlPct : null,
         payload.event,
         payload.runtimeCfg ?? {},
         recordedAt,

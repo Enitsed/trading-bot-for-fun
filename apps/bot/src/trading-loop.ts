@@ -29,6 +29,7 @@ export async function executeTradingLoop(): Promise<void> {
   let lastTradeTs: number | null = null;
   let signals: Signal[] = [];
   let equityHwm = 0;
+  let initialEquity: number | null = null;
 
   while (true) {
     try {
@@ -60,6 +61,11 @@ export async function executeTradingLoop(): Promise<void> {
       let position = await getPositionQty(exchange);
       const { equity, balances, mark } = await calculateEquity(exchange);
 
+      if (initialEquity === null) {
+        initialEquity = equity;
+        equityHwm = equity;
+      }
+
       equityHwm = Math.max(equityHwm, equity);
       const drawdown = equityHwm > 0 ? (equity - equityHwm) / equityHwm : 0;
 
@@ -70,6 +76,9 @@ export async function executeTradingLoop(): Promise<void> {
         notionalMin: precision.notionalMin,
         tradable: precision.baseMin,
       };
+
+      const totalPnl = initialEquity !== null ? equity - initialEquity : 0;
+      const totalPnlPct = initialEquity && initialEquity !== 0 ? totalPnl / initialEquity : 0;
 
       let event = 'idle';
 
@@ -198,6 +207,8 @@ export async function executeTradingLoop(): Promise<void> {
         signal: latestSignal,
         position,
         equity,
+        totalPnl,
+        totalPnlPct,
         event,
         runtimeCfg,
       };
@@ -214,6 +225,8 @@ export async function executeTradingLoop(): Promise<void> {
         thresholds,
         equity,
         drawdown,
+        totalPnl,
+        totalPnlPct,
         mark,
         balances,
         lastTradeTs,
@@ -238,6 +251,8 @@ export async function executeTradingLoop(): Promise<void> {
         thresholds: { baseMin: 0, baseStep: 0, notionalMin: 0, tradable: 0 },
         equity: 0,
         drawdown: 0,
+        totalPnl: 0,
+        totalPnlPct: 0,
         mark: 0,
         balances: { quoteFree: 0, quoteTotal: 0, baseFree: 0, baseTotal: 0 },
         lastTradeTs,

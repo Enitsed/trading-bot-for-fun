@@ -22,6 +22,8 @@ export type Snapshot = {
   };
   equity: number;
   drawdown: number;
+  totalPnl: number;
+  totalPnlPct: number;
   mark: number;
   balances: BalanceSnapshot;
   lastTradeTs: number | null;
@@ -54,6 +56,8 @@ type PublishParams = {
   };
   equity: number;
   drawdown: number;
+  totalPnl: number;
+  totalPnlPct: number;
   mark: number;
   balances: BalanceSnapshot;
   lastTradeTs: number | null;
@@ -75,6 +79,8 @@ export async function publishSnapshot(params: PublishParams): Promise<void> {
     thresholds: params.thresholds,
     equity: params.equity,
     drawdown: params.drawdown,
+    totalPnl: params.totalPnl,
+    totalPnlPct: params.totalPnlPct,
     mark: params.mark,
     balances: params.balances,
     lastTradeTs: params.lastTradeTs,

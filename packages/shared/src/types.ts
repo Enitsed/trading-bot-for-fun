@@ -64,6 +64,8 @@ export type TelemetrySnapshot = {
   } | null;
   equity: number;
   drawdown: number;
+  totalPnl: number;
+  totalPnlPct: number;
   mark: number;
   balances?: {
     quoteFree?: number;
