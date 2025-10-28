@@ -12,12 +12,13 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rimraf dist",
     "prepare": "pnpm run build",
-    "dev:live": "tsx --env-file ./.env src/live.ts",
-    "dev:backtest": "tsx --env-file ./.env src/backtest.ts",
-    "start:live": "node dist/live.js",
-    "start:backtest": "node dist/backtest.js"
+    "dev:live": "tsx --env-file ./.env src/interface/live.ts",
+    "dev:backtest": "tsx --env-file ./.env src/interface/backtest.ts",
+    "start:live": "node dist/interface/live.js",
+    "start:backtest": "node dist/interface/backtest.js"
   },
   "dependencies": {
+    "@scalper/domain": "workspace:*",
     "@scalper/shared": "workspace:*",
     "ccxt": "^4.2.99",
     "csv-parse": "^5.5.6",

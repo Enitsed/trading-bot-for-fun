@@ -119,12 +119,24 @@ export async function fetchPendingCommands(): Promise<Array<{
       where: { status: 'pending' },
       order: [['created_at', 'ASC']],
     })) as ManualCommandModel[];
-    return rows.map((row) => ({
-      id: row.get('id') as string,
-      type: row.get('type') as ManualActionType,
-      amount: toNumber(row.get('amount')),
-      createdAt: row.get('created_at') as Date,
-    }));
+    return rows.map((row) => {
+      const primary = row.get('createdAt');
+      const fallback = row.get('created_at');
+      const createdAt =
+        primary instanceof Date
+          ? primary
+          : fallback instanceof Date
+            ? fallback
+            : typeof fallback === 'string' || typeof fallback === 'number'
+              ? new Date(fallback)
+              : new Date();
+      return {
+        id: row.get('id') as string,
+        type: row.get('type') as ManualActionType,
+        amount: toNumber(row.get('amount')),
+        createdAt,
+      };
+    });
   } catch (error) {
     if (isUndefinedTableError(error)) {
       logMissingTableOnce('manual_commands');

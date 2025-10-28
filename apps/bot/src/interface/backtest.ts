@@ -1,9 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'csv-parse/sync';
-import { rsiReversionSignals, type Candle } from './strategy.js';
-import { computeBracket, hitBracket, sizeByRisk } from './risk.js';
-import { CFG } from './config.js';
+import {
+  rsiReversionSignals,
+  type Candle,
+  computeBracket,
+  hitBracket,
+  sizeByRisk,
+  type Bracket,
+} from '@scalper/domain';
+import { CFG } from '@scalper/bot/infrastructure/config.js';
 
 /** CSV format assumed: ts,open,high,low,close,volume (ts in ms) */
 function readCsv(filePath: string): Candle[] {
@@ -25,7 +31,7 @@ function backtest(candles: Candle[]) {
   let cash = 10000; // 쿼트 통화 잔고(예: USDT)
   let qty = 0; // 보유 중인 베이스 자산 수량(예: BTC)
   let entryPrice = 0; // 현재 포지션의 진입 가격
-  let bracket: ReturnType<typeof computeBracket> | null = null; // 활성화된 스탑/익절 구간
+  let bracket: Bracket | null = null; // 활성화된 스탑/익절 구간
   const equityCurve: number[] = []; // 시간별 총 평가금액 기록
 
   for (let i = 1; i < candles.length; i++) {
@@ -47,7 +53,7 @@ function backtest(candles: Candle[]) {
 
     const signal = signals[i]; // 현재 캔들의 시그널
     if (signal === 'LONG' && qty === 0) {
-      const size = sizeByRisk(equity, price);
+      const size = sizeByRisk(equity, price, CFG.riskPerTrade);
       const feeAdj = size * price * 0.0006;
       const spend = Math.min(cash, size * price + feeAdj);
       const buyQty = spend / price;
@@ -55,7 +61,7 @@ function backtest(candles: Candle[]) {
         qty += buyQty;
         cash -= spend;
         entryPrice = price;
-        bracket = computeBracket(entryPrice);
+        bracket = computeBracket(entryPrice, { stopPct: CFG.stopPct, takePct: CFG.takePct });
       }
     } else if (signal === 'EXIT' && qty > 0) {
       cash += qty * price * (1 - 0.0006);

@@ -3,6 +3,7 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    "baseUrl": "./src",
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
@@ -13,7 +14,12 @@
     "declarationMap": true,
     "paths": {
       "@scalper/shared": ["../../packages/shared/src"],
-      "@scalper/shared/*": ["../../packages/shared/src/*"]
+      "@scalper/shared/*": ["../../packages/shared/src/*"],
+      "@scalper/domain": ["../../packages/domain/src"],
+      "@scalper/domain/*": ["../../packages/domain/src/*"],
+      "@scalper/bot/application/*": ["application/*"],
+      "@scalper/bot/infrastructure/*": ["infrastructure/*"],
+      "@scalper/bot/interface/*": ["interface/*"]
     }
   },
   "include": ["src/**/*"],

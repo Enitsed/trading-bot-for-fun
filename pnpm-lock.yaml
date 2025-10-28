@@ -10,6 +10,9 @@ importers:
 
   apps/bot:
     dependencies:
+      '@scalper/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@scalper/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -78,6 +81,18 @@ importers:
       '@types/react-dom':
         specifier: 18.2.19
         version: 18.2.19
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/domain:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.18.10
+        version: 22.18.10
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

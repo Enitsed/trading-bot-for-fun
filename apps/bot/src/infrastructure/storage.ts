@@ -1,4 +1,4 @@
-import { CFG } from './config.js';
+import { CFG } from '@scalper/bot/infrastructure/config.js';
 import { ensureDbConnection, syncModels, PriceTickModel, TradeEventModel, isUndefinedTableError, logMissingTable } from '@scalper/shared';
 
 export type PriceTickPayload = {

@@ -1,6 +1,6 @@
 import type { Exchange } from 'ccxt';
 import { botLogger } from '@scalper/shared';
-import { CFG } from './config.js';
+import { CFG } from '@scalper/bot/infrastructure/config.js';
 
 export type BalanceSnapshot = {
   quoteFree: number;

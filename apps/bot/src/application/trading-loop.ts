@@ -7,13 +7,26 @@ import {
   placeMarket,
   quotePrecision,
   toAmountPrecision,
-} from './exchange.js';
-import { rsiReversionSignals, type Candle as StrategyCandle } from './strategy.js';
-import { sizeByRisk, computeBracket, hitBracket, withinCooldown } from './risk.js';
-import { prepareStorage, recordPriceTick, recordTrade, type PriceTickPayload, type TradeRecordPayload } from './storage.js';
-import { calculateEquity } from './balance.js';
-import { publishSnapshot, type RuntimeCfg } from './telemetry.js';
-import { CFG } from './config.js';
+} from '@scalper/bot/infrastructure/exchange.js';
+import {
+  rsiReversionSignals,
+  sizeByRisk,
+  computeBracket,
+  hitBracket,
+  withinCooldown,
+  type Candle as StrategyCandle,
+  type Bracket,
+} from '@scalper/domain';
+import {
+  prepareStorage,
+  recordPriceTick,
+  recordTrade,
+  type PriceTickPayload,
+  type TradeRecordPayload,
+} from '@scalper/bot/infrastructure/storage.js';
+import { calculateEquity } from '@scalper/bot/infrastructure/balance.js';
+import { publishSnapshot, type RuntimeCfg } from '@scalper/bot/infrastructure/telemetry.js';
+import { CFG } from '@scalper/bot/infrastructure/config.js';
 
 export async function executeTradingLoop(): Promise<void> {
   await botLogger.info('Starting trading loop', 'LOOP');
@@ -25,7 +38,7 @@ export async function executeTradingLoop(): Promise<void> {
   await prepareStorage();
 
   let entryPrice = 0;
-  let openBracket: { stop: number; take: number } | null = null;
+  let openBracket: Bracket | null = null;
   let lastTradeTs: number | null = null;
   let signals: Signal[] = [];
   let equityHwm = 0;

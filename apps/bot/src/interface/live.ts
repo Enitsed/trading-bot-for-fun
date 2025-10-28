@@ -1,9 +1,24 @@
 import type { Exchange } from 'ccxt';
-import { connect, fetchOHLCV, getPositionQty, placeMarket, quotePrecision, toAmountPrecision } from './exchange.js';
-import { rsiReversionSignals, type Candle, type Signal } from './strategy.js';
-import { sizeByRisk, computeBracket, hitBracket, withinCooldown } from './risk.js';
-import { CFG } from './config.js';
-import { prepareStorage, recordPriceTick, recordTrade } from './storage.js';
+import {
+  connect,
+  fetchOHLCV,
+  getPositionQty,
+  placeMarket,
+  quotePrecision,
+  toAmountPrecision,
+} from '@scalper/bot/infrastructure/exchange.js';
+import {
+  rsiReversionSignals,
+  sizeByRisk,
+  computeBracket,
+  hitBracket,
+  withinCooldown,
+  type Candle,
+  type Signal,
+  type Bracket,
+} from '@scalper/domain';
+import { CFG } from '@scalper/bot/infrastructure/config.js';
+import { prepareStorage, recordPriceTick, recordTrade } from '@scalper/bot/infrastructure/storage.js';
 import {
   fetchPendingCommands,
   getRuntimeOverrides,
@@ -11,13 +26,7 @@ import {
   saveTelemetrySnapshot,
 } from '@scalper/shared';
 import type { TelemetrySnapshot, ManualActionType } from '@scalper/shared';
-
-type BalanceSnapshot = {
-  quoteFree: number;
-  quoteTotal: number;
-  baseFree: number;
-  baseTotal: number;
-};
+import { calculateEquity, type BalanceSnapshot } from '@scalper/bot/infrastructure/balance.js';
 
 type Snapshot = {
   timestamp: number;
@@ -26,7 +35,7 @@ type Snapshot = {
   recentSignals: Signal[];
   position: number;
   entryPrice: number;
-  openBracket: ReturnType<typeof computeBracket> | null;
+  openBracket: Bracket | null;
   thresholds: {
     baseMin: number;
     baseStep: number;
@@ -167,7 +176,7 @@ async function handleCommand(
     mark: number;
     position: number;
     entryPrice: number;
-    openBracket: ReturnType<typeof computeBracket> | null;
+    openBracket: Bracket | null;
     runtimeCfg: RuntimeCfg;
     drawdown: number;
     thresholds: Snapshot['thresholds'];
@@ -179,7 +188,7 @@ async function handleCommand(
   mark: number;
   position: number;
   entryPrice: number;
-  openBracket: ReturnType<typeof computeBracket> | null;
+  openBracket: Bracket | null;
   lastTradeTs: number | null;
   event: string;
 }> {
@@ -188,7 +197,7 @@ async function handleCommand(
   let event = `command:${command.type}`;
 
   const refreshState = async () => {
-    const refreshed = await equityQuote(exchange);
+    const refreshed = await calculateEquity(exchange);
     equity = refreshed.equity;
     balances = refreshed.balances;
     mark = refreshed.mark;
@@ -356,7 +365,7 @@ async function publishSnapshot(data: {
   signals: Signal[];
   position: number;
   entryPrice: number;
-  openBracket: ReturnType<typeof computeBracket> | null;
+  openBracket: Bracket | null;
   thresholds: Snapshot['thresholds'];
   equity: number;
   drawdown: number;
@@ -411,7 +420,7 @@ async function publishSnapshot(data: {
 }
 
 let lastTradeTs: number | null = null; // 마지막 체결 시각(ms)
-let openBracket: ReturnType<typeof computeBracket> | null = null; // 현재 포지션의 스탑/익절 정보
+let openBracket: Bracket | null = null; // 현재 포지션의 스탑/익절 정보
 let entryPrice = 0; // 현재 포지션 진입가
 
 async function loop() {
@@ -422,7 +431,7 @@ async function loop() {
 
   const { baseMin, baseStep, notionalMin } = await quotePrecision(exchange); // 최소 주문 수량과 스텝
   console.log(`Base min: ${baseMin}, step: ${baseStep}, notional min: ${notionalMin}`);
-  const { equity: dayStartEquity } = await equityQuote(exchange); // 일 시작 시점 평가금액
+  const { equity: dayStartEquity } = await calculateEquity(exchange); // 일 시작 시점 평가금액
 
   console.log(`Starting bot on ${CFG.exchange} ${CFG.symbol} (sandbox=${CFG.useSandbox})`);
   let lastBarTs = 0;
@@ -453,7 +462,7 @@ async function loop() {
       }
       lastBarTs = latestTs;
 
-      let { equity, balances, mark } = await equityQuote(exchange); // 현재 평가금액 및 잔고
+      let { equity, balances, mark } = await calculateEquity(exchange); // 현재 평가금액 및 잔고
       const drawdown = (equity / dayStartEquity - 1) * 100; // 일일 손익률
       console.log(`Current equity: ${equity.toFixed(2)} (${drawdown.toFixed(2)}%)`);
       const signals = rsiReversionSignals(candles, {
@@ -564,7 +573,7 @@ async function loop() {
             entryPrice = 0;
             lastTradeTs = executedAt;
             console.log(`[${hit}] exit @ ~${price}`);
-            ({ equity, balances, mark } = await equityQuote(exchange));
+            ({ equity, balances, mark } = await calculateEquity(exchange));
             position = await getPositionQty(exchange);
             event = hit === 'STOP' ? 'bracket-stop' : 'bracket-take';
             const details = extractOrderDetails(order);
@@ -667,7 +676,7 @@ async function loop() {
           await sleep(5_000);
           continue;
         }
-        ({ equity, balances, mark } = await equityQuote(exchange));
+        ({ equity, balances, mark } = await calculateEquity(exchange));
         const eqQuote = equity; // 최신 평가금액
         const rawQty = sizeByRisk(eqQuote, price, runtimeCfg.riskPerTrade); // 위험 비율 기반 수량
         let amount = Math.max(toAmountPrecision(exchange, rawQty), 0); // 거래소 정밀도에 맞춘 수량
@@ -688,7 +697,7 @@ async function loop() {
           });
           lastTradeTs = executedAt;
           console.log(`BUY ${amount} @ ~${price} bracket=${JSON.stringify(openBracket)}`);
-          ({ equity, balances, mark } = await equityQuote(exchange));
+          ({ equity, balances, mark } = await calculateEquity(exchange));
           position = await getPositionQty(exchange);
           event = 'buy';
           const details = extractOrderDetails(order);
@@ -774,7 +783,7 @@ async function loop() {
           entryPrice = 0;
           lastTradeTs = executedAt;
           console.log(`EXIT @ ~${price}`);
-          ({ equity, balances, mark } = await equityQuote(exchange));
+          ({ equity, balances, mark } = await calculateEquity(exchange));
           event = 'exit';
           position = await getPositionQty(exchange);
           const details = extractOrderDetails(order);
@@ -892,41 +901,6 @@ async function loop() {
       await sleep(10_000);
     }
   }
-}
-
-async function equityQuote(exchange: Exchange): Promise<{
-  equity: number;
-  balances: BalanceSnapshot;
-  mark: number;
-}> {
-  const balance = await exchange.fetchBalance(); // 거래소 잔고
-  const market = exchange.market(CFG.symbol);
-  const quoteCode = typeof market?.quote === 'string' ? market.quote : CFG.quote;
-  const baseCode = typeof market?.base === 'string' ? market.base : CFG.base;
-  const quote = balance[quoteCode];
-  const base = balance[baseCode];
-  const quoteFree = typeof quote?.free === 'number' ? quote.free : typeof quote?.total === 'number' ? quote.total : 0;
-  const quoteTotal = typeof quote?.total === 'number' ? quote.total : quoteFree;
-  const baseFree = typeof base?.free === 'number' ? base.free : typeof base?.total === 'number' ? base.total : 0;
-  const baseTotal = typeof base?.total === 'number' ? base.total : baseFree;
-  console.log('Balance:', {
-    QUOTE: { free: quoteFree, total: quoteTotal },
-    BASE: { free: baseFree, total: baseTotal },
-  });
-  let mark = 0; // 베이스 자산 마킹 가격
-  try {
-    const ticker = await exchange.fetchTicker(CFG.symbol); // 최신 호가로 마킹
-    mark = (ticker?.last ?? ticker?.close ?? 0) as number;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : JSON.stringify(error);
-    console.warn('Ticker fetch failed:', message);
-  }
-  const equity = quoteFree + baseTotal * (mark || 0);
-  return {
-    equity,
-    balances: { quoteFree, quoteTotal, baseFree, baseTotal },
-    mark,
-  };
 }
 
 function sleep(ms: number) {

@@ -1,6 +1,6 @@
 import ccxt, { type Exchange, type OHLCV, type Order } from 'ccxt';
 import { v4 as uuidv4 } from 'uuid';
-import { CFG } from './config.js';
+import { CFG } from '@scalper/bot/infrastructure/config.js';
 
 // 거래소 인스턴스를 생성하고 마켓 정보를 미리 로드
 export async function connect(): Promise<Exchange> {

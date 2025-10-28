@@ -1,7 +1,7 @@
 import type { Signal, Candle } from '@scalper/shared';
 import { botLogger, saveTelemetrySnapshot } from '@scalper/shared';
 import type { BalanceSnapshot } from './balance.js';
-import { CFG } from './config.js';
+import { CFG } from '@scalper/bot/infrastructure/config.js';
 
 export type Snapshot = {
   timestamp: number;

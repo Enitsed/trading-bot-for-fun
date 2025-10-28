@@ -22,7 +22,13 @@
       {
         "name": "next"
       }
-    ]
+    ],
+    "paths": {
+      "@scalper/domain": ["../../packages/domain/src"],
+      "@scalper/domain/*": ["../../packages/domain/src/*"],
+      "@scalper/shared": ["../../packages/shared/src"],
+      "@scalper/shared/*": ["../../packages/shared/src/*"]
+    }
   },
   "include": [
     "next-env.d.ts",

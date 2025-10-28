@@ -1,8 +1,7 @@
-export { CFG } from './config.js';
-export * from './storage.js';
-export * from './strategy.js';
-export * from './risk.js';
-export * from './exchange.js';
-export * from './indicators.js';
-export * from './telemetry.js';
-export * from './trading-loop.js';
+export { CFG } from '@scalper/bot/infrastructure/config.js';
+export * from '@scalper/bot/infrastructure/storage.js';
+export * from '@scalper/bot/infrastructure/exchange.js';
+export * from '@scalper/bot/infrastructure/balance.js';
+export * from '@scalper/bot/infrastructure/telemetry.js';
+export * from '@scalper/bot/application/trading-loop.js';
+export * from '@scalper/domain';

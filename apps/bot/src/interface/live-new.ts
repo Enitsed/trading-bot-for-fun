@@ -1,4 +1,4 @@
-import { executeTradingLoop } from './trading-loop.js';
+import { executeTradingLoop } from '@scalper/bot/application/trading-loop.js';
 import { botLogger } from '@scalper/shared';
 
 async function main(): Promise<void> {

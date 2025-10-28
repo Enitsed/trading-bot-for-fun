@@ -588,7 +588,7 @@ export default function DashboardPage(): JSX.Element {
               RSI 기간
               <input
                 type="number"
-                min="2"
+                min="1"
                 step="1"
                 value={settingsForm.rsiLen}
                 onChange={handleSettingsChange('rsiLen')}
