@@ -227,11 +227,12 @@ export default function DashboardPage(): JSX.Element {
     }));
   }, [snapshot, settingsDirty]);
 
-  const handleSettingsChange = (key: RuntimeOverrideKey) => (event: ChangeEvent<HTMLInputElement>) => {
-    const { value } = event.target;
-    setSettingsForm((prev) => ({ ...prev, [key]: value }));
-    setSettingsDirty(true);
-  };
+  const handleSettingsChange =
+    (key: RuntimeOverrideKey) => (event: ChangeEvent<HTMLInputElement>) => {
+      const { value } = event.target;
+      setSettingsForm((prev) => ({ ...prev, [key]: value }));
+      setSettingsDirty(true);
+    };
 
   const handleSettingsSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -367,12 +368,12 @@ export default function DashboardPage(): JSX.Element {
       {
         label: `현금 잔고 (${quoteCurrency})`,
         value: quoteFree,
-        note: `매수에 사용할 수 있는 ${quoteCurrency} 금액`
+        note: `매수에 사용할 수 있는 ${quoteCurrency} 금액`,
       },
       {
         label: `코인 잔고 (${baseCurrency})`,
         value: baseFree,
-        note: `보유 중인 ${baseCurrency} 수량 (매도 시 현금 전환)`
+        note: `보유 중인 ${baseCurrency} 수량 (매도 시 현금 전환)`,
       },
     ];
   }, [snapshot]);
@@ -391,12 +392,15 @@ export default function DashboardPage(): JSX.Element {
       <header>
         <h1>실시간 트레이딩 현황</h1>
         <p className="meta">
-          마지막 스냅샷: {formatTimestamp(snapshot?.timestamp)} · 최근 이벤트: {snapshot?.event || '-'}
+          마지막 스냅샷: {formatTimestamp(snapshot?.timestamp)} · 최근 이벤트:{' '}
+          {snapshot?.event || '-'}
         </p>
       </header>
 
       {status === 'loading' && <p className="notice">데이터를 불러오는 중입니다…</p>}
-      {status === 'empty' && <p className="notice">아직 생성된 스냅샷이 없습니다. 봇을 실행해 주세요.</p>}
+      {status === 'empty' && (
+        <p className="notice">아직 생성된 스냅샷이 없습니다. 봇을 실행해 주세요.</p>
+      )}
       {status === 'error' && (
         <p className="notice error">데이터를 불러올 수 없습니다: {error ?? '알 수 없는 오류'}</p>
       )}
@@ -447,7 +451,11 @@ export default function DashboardPage(): JSX.Element {
                   <dt>손절/익절</dt>
                   <dd>
                     {snapshot.openBracket
-                      ? `STOP ${formatNumber(snapshot.openBracket.stop, { fractionDigits: 2 })} / TAKE ${formatNumber(snapshot.openBracket.take, { fractionDigits: 2 })}`
+                      ? `STOP ${formatNumber(snapshot.openBracket.stop, {
+                          fractionDigits: 2,
+                        })} / TAKE ${formatNumber(snapshot.openBracket.take, {
+                          fractionDigits: 2,
+                        })}`
                       : '-'}
                   </dd>
                 </div>
@@ -527,7 +535,9 @@ export default function DashboardPage(): JSX.Element {
 
       {historyStatus === 'loading' && <p className="notice">차트를 준비하는 중입니다…</p>}
       {historyStatus === 'error' && (
-        <p className="notice error">차트를 불러오지 못했습니다: {historyError ?? '알 수 없는 오류'}</p>
+        <p className="notice error">
+          차트를 불러오지 못했습니다: {historyError ?? '알 수 없는 오류'}
+        </p>
       )}
 
       {historyStatus === 'ready' && (
@@ -577,9 +587,8 @@ export default function DashboardPage(): JSX.Element {
         <p className="note">값은 다음 루프에서 반영됩니다. 비워두면 기존 값을 유지합니다.</p>
         {runtimeCfg && (
           <p className="note current">
-            현재: RSI({runtimeCfg.rsiLen}) · 진입 {runtimeCfg.rsiEntry} / 청산 {runtimeCfg.rsiExit} · 위험 {(
-              runtimeCfg.riskPerTrade * 100
-            ).toFixed(2)}%
+            현재: RSI({runtimeCfg.rsiLen}) · 진입 {runtimeCfg.rsiEntry} / 청산 {runtimeCfg.rsiExit}{' '}
+            · 위험 {(runtimeCfg.riskPerTrade * 100).toFixed(2)}%
           </p>
         )}
         <form className="settings-form" onSubmit={handleSettingsSubmit}>
@@ -588,7 +597,7 @@ export default function DashboardPage(): JSX.Element {
               RSI 기간
               <input
                 type="number"
-                min="1"
+                min="2"
                 step="1"
                 value={settingsForm.rsiLen}
                 onChange={handleSettingsChange('rsiLen')}
@@ -681,7 +690,9 @@ export default function DashboardPage(): JSX.Element {
               min="0"
               step="0.000001"
               value={manualAmount}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setManualAmount(event.target.value)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setManualAmount(event.target.value)
+              }
               placeholder="미입력 시 최소 주문"
             />
           </label>
@@ -736,12 +747,20 @@ function mapRuntimeToForm(
   if (source.rsiEntry !== undefined) next.rsiEntry = String(source.rsiEntry ?? '');
   if (source.rsiExit !== undefined) next.rsiExit = String(source.rsiExit ?? '');
   if (source.stopPct !== undefined)
-    next.stopPct = source.stopPct !== null && source.stopPct !== undefined ? formatPercentInput(source.stopPct) : '';
+    next.stopPct =
+      source.stopPct !== null && source.stopPct !== undefined
+        ? formatPercentInput(source.stopPct)
+        : '';
   if (source.takePct !== undefined)
-    next.takePct = source.takePct !== null && source.takePct !== undefined ? formatPercentInput(source.takePct) : '';
+    next.takePct =
+      source.takePct !== null && source.takePct !== undefined
+        ? formatPercentInput(source.takePct)
+        : '';
   if (source.riskPerTrade !== undefined)
     next.riskPerTrade =
-      source.riskPerTrade !== null && source.riskPerTrade !== undefined ? formatPercentInput(source.riskPerTrade) : '';
+      source.riskPerTrade !== null && source.riskPerTrade !== undefined
+        ? formatPercentInput(source.riskPerTrade)
+        : '';
   if (source.cooldownMin !== undefined) next.cooldownMin = String(source.cooldownMin ?? '');
   return next;
 }
