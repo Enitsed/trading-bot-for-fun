@@ -98,6 +98,42 @@ export async function prepareStorage(): Promise<boolean> {
 export async function recordPriceTick(payload: PriceTickPayload): Promise<void> {
   if (!pgEnabled()) return;
   if (!(await prepareStorage())) return;
+
+  const candleAtMs = Number(payload.candleTs);
+  const priceFields = {
+    open: payload.open,
+    high: payload.high,
+    low: payload.low,
+    close: payload.close,
+  } as const;
+
+  const hasInvalidPrice = Object.entries(priceFields).some(([key, value]) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      console.warn(`[DB] Skip price tick: ${key} is invalid (${value})`);
+      return true;
+    }
+    return false;
+  });
+  if (hasInvalidPrice) return;
+
+  if (!Number.isFinite(candleAtMs) || candleAtMs <= 0) {
+    console.warn('[DB] Skip price tick: candle timestamp is invalid', candleAtMs);
+    return;
+  }
+
+  if (payload.high < payload.low) {
+    console.warn('[DB] Skip price tick: high is lower than low', {
+      high: payload.high,
+      low: payload.low,
+    });
+    return;
+  }
+
+  if (!Number.isFinite(payload.volume) || payload.volume < 0) {
+    console.warn('[DB] Skip price tick: volume is invalid', payload.volume);
+    return;
+  }
+
   const recordedAt = new Date(payload.recordedAt ?? Date.now());
   const candleAt = new Date(payload.candleTs);
   try {
