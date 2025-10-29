@@ -67,16 +67,9 @@ export async function prepareStorage(): Promise<boolean> {
     while (isSyncing) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    // Check result of sync that just completed
-    if (syncPromise) {
-      try {
-        await syncPromise;
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    return false;
+    // Sync completed - check if it succeeded
+    // If syncPromise is still set, it succeeded. If null, it failed.
+    return syncPromise !== null;
   }
 
   isSyncing = true;

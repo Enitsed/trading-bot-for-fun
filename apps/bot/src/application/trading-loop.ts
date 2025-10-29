@@ -44,12 +44,37 @@ export async function executeTradingLoop(): Promise<void> {
   let equityHwm = 0;
   let initialEquity: number | null = null;
 
+  // Circuit breaker state
+  let consecutiveErrors = 0;
+  const maxConsecutiveErrors = 5;
+  let errorBackoffMs = 10_000;
+
   while (true) {
     try {
-      const [rawCandles, runtimeCfg] = await Promise.all([
-        fetchOHLCV(exchange, maxCandles),
-        loadRuntimeConfig(),
-      ]);
+      // Fetch candles and runtime config with individual error handling
+      let rawCandles: OHLCV[];
+      let runtimeCfg: RuntimeCfg;
+
+      try {
+        [rawCandles, runtimeCfg] = await Promise.all([
+          fetchOHLCV(exchange, maxCandles),
+          loadRuntimeConfig(),
+        ]);
+      } catch (error) {
+        // Handle partial failures
+        const message = error instanceof Error ? error.message : String(error);
+        await botLogger.error(`Failed to fetch data: ${message}`, 'LOOP');
+
+        // Try individual fetches as fallback
+        try {
+          rawCandles = await fetchOHLCV(exchange, maxCandles);
+          runtimeCfg = await loadRuntimeConfig();
+        } catch (fallbackError) {
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+          await botLogger.error(`Fallback fetch also failed: ${fallbackMessage}`, 'LOOP');
+          throw error; // Re-throw original error to trigger outer catch
+        }
+      }
 
       const candles = mapCandles(rawCandles);
 
@@ -95,7 +120,16 @@ export async function executeTradingLoop(): Promise<void> {
 
       let event = 'idle';
 
-      const bracketHit = openBracket ? hitBracket(latestPrice, openBracket) : null;
+      let bracketHit: 'STOP' | 'TAKE' | null = null;
+      try {
+        bracketHit = openBracket ? hitBracket(latestPrice, openBracket) : null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await botLogger.error(`Bracket validation failed: ${message}`, 'TRADE');
+        // Reset invalid bracket
+        openBracket = null;
+      }
+
       if (openBracket && bracketHit) {
         await botLogger.info(`Bracket hit (${bracketHit}) at price ${latestPrice}`, 'TRADE');
 
@@ -105,7 +139,20 @@ export async function executeTradingLoop(): Promise<void> {
 
           try {
             const order = await placeMarket(exchange, closeSide, closeQty);
-            position = 0;
+
+            // Verify position was actually closed
+            const newPosition = await getPositionQty(exchange);
+
+            if (Math.abs(newPosition) > thresholds.baseMin) {
+              await botLogger.warn(
+                `Position not fully closed. Expected 0, got ${newPosition}`,
+                'TRADE'
+              );
+              position = newPosition;
+            } else {
+              position = 0;
+            }
+
             const tradePayload: TradeRecordPayload = {
               side: closeSide,
               amount: closeQty,
@@ -123,8 +170,14 @@ export async function executeTradingLoop(): Promise<void> {
             event = bracketHit === 'TAKE' ? 'take-profit' : 'stop-loss';
             await botLogger.info(`Position closed via bracket: ${closeSide} ${closeQty}`, 'TRADE');
           } catch (error) {
-            const message = error instanceof Error ? error.message : JSON.stringify(error);
+            const message = error instanceof Error ? error.message : String(error);
+            const stack = error instanceof Error ? error.stack : undefined;
             await botLogger.error(`Bracket close failed: ${message}`, 'TRADE');
+            if (stack) {
+              await botLogger.debug(stack, 'TRADE');
+            }
+            // Don't update position on failure
+            continue;
           }
         }
 
@@ -140,38 +193,63 @@ export async function executeTradingLoop(): Promise<void> {
           await botLogger.info('Trade skipped due to cooldown', 'COOLDOWN');
         } else {
           const tradeSize = sizeByRisk(equity, latestPrice, runtimeCfg.riskPerTrade);
-          const buyQty = await toAmountPrecision(exchange, tradeSize);
+          const buyQty = toAmountPrecision(exchange, tradeSize);
 
           if (buyQty >= thresholds.baseMin && buyQty * latestPrice >= thresholds.notionalMin) {
             try {
               const order = await placeMarket(exchange, 'buy', buyQty);
-              entryPrice = latestPrice;
-              openBracket = computeBracket(entryPrice, {
-                stopPct: runtimeCfg.stopPct,
-                takePct: runtimeCfg.takePct,
-              });
-              lastTradeTs = Date.now();
-              event = 'buy';
 
-              position += buyQty;
-              const tradePayload: TradeRecordPayload = {
-                side: 'buy',
-                amount: buyQty,
-                price: latestPrice,
-                event: 'signal',
-                orderId: order?.id,
-                symbol: CFG.symbol,
-                ts: Date.now(),
-                position,
-                equity,
-              };
+              // Verify position was actually opened
+              const newPosition = await getPositionQty(exchange);
 
-              await recordTrade(tradePayload);
+              if (newPosition < thresholds.baseMin) {
+                await botLogger.warn(
+                  `Position not opened. Expected ~${buyQty}, got ${newPosition}`,
+                  'TRADE'
+                );
+                position = newPosition;
+                // Don't set entryPrice or bracket if position didn't open
+              } else {
+                position = newPosition;
+                entryPrice = latestPrice;
 
-              await botLogger.info(`Long position opened: ${buyQty} at ${latestPrice}`, 'TRADE');
+                try {
+                  openBracket = computeBracket(entryPrice, {
+                    stopPct: runtimeCfg.stopPct,
+                    takePct: runtimeCfg.takePct,
+                  });
+                } catch (bracketError) {
+                  const bracketMessage = bracketError instanceof Error ? bracketError.message : String(bracketError);
+                  await botLogger.error(`Failed to compute bracket: ${bracketMessage}`, 'TRADE');
+                  openBracket = null;
+                }
+
+                lastTradeTs = Date.now();
+                event = 'buy';
+
+                const tradePayload: TradeRecordPayload = {
+                  side: 'buy',
+                  amount: buyQty,
+                  price: latestPrice,
+                  event: 'signal',
+                  orderId: order?.id,
+                  symbol: CFG.symbol,
+                  ts: Date.now(),
+                  position,
+                  equity,
+                };
+
+                await recordTrade(tradePayload);
+
+                await botLogger.info(`Long position opened: ${buyQty} at ${latestPrice}`, 'TRADE');
+              }
             } catch (error) {
-              const message = error instanceof Error ? error.message : JSON.stringify(error);
+              const message = error instanceof Error ? error.message : String(error);
+              const stack = error instanceof Error ? error.stack : undefined;
               await botLogger.error(`Buy order failed: ${message}`, 'TRADE');
+              if (stack) {
+                await botLogger.debug(stack, 'TRADE');
+              }
             }
           }
         }
@@ -182,12 +260,25 @@ export async function executeTradingLoop(): Promise<void> {
 
         try {
           const order = await placeMarket(exchange, 'sell', closeQty);
+
+          // Verify position was actually closed
+          const newPosition = await getPositionQty(exchange);
+
+          if (Math.abs(newPosition) > thresholds.baseMin) {
+            await botLogger.warn(
+              `Position not fully closed. Expected 0, got ${newPosition}`,
+              'TRADE'
+            );
+            position = newPosition;
+          } else {
+            position = 0;
+          }
+
           entryPrice = 0;
           openBracket = null;
           lastTradeTs = Date.now();
           event = 'exit';
 
-          position = 0;
           const tradePayload: TradeRecordPayload = {
             side: 'sell',
             amount: closeQty,
@@ -204,8 +295,12 @@ export async function executeTradingLoop(): Promise<void> {
 
           await botLogger.info(`Position closed via signal: sell ${closeQty}`, 'TRADE');
         } catch (error) {
-          const message = error instanceof Error ? error.message : JSON.stringify(error);
+          const message = error instanceof Error ? error.message : String(error);
+          const stack = error instanceof Error ? error.stack : undefined;
           await botLogger.error(`Exit order failed: ${message}`, 'TRADE');
+          if (stack) {
+            await botLogger.debug(stack, 'TRADE');
+          }
         }
       }
 
@@ -249,33 +344,90 @@ export async function executeTradingLoop(): Promise<void> {
         candle: latestSharedCandle,
       });
 
+      // Reset error counter on successful loop iteration
+      consecutiveErrors = 0;
+      errorBackoffMs = 10_000;
+
       await sleep(loopIntervalMs);
     } catch (error) {
+      consecutiveErrors++;
+
       const message = error instanceof Error ? error.message : JSON.stringify(error);
-      await botLogger.error(`Loop error: ${message}`, 'LOOP');
+      const stack = error instanceof Error ? error.stack : undefined;
 
-      await publishSnapshot({
-        price: 0,
-        signal: 'HOLD',
-        signals: ['HOLD'],
-        position: 0,
-        entryPrice,
-        openBracket,
-        thresholds: { baseMin: 0, baseStep: 0, notionalMin: 0, tradable: 0 },
-        equity: 0,
-        drawdown: 0,
-        totalPnl: 0,
-        totalPnlPct: 0,
-        mark: 0,
-        balances: { quoteFree: 0, quoteTotal: 0, baseFree: 0, baseTotal: 0 },
-        lastTradeTs,
-        event: `error:${message}`,
-        runtimeCfg: getDefaultRuntimeConfig(),
-        candleTs: Date.now(),
-        candle: null,
-      });
+      await botLogger.error(
+        `Loop error (${consecutiveErrors}/${maxConsecutiveErrors}): ${message}`,
+        'LOOP'
+      );
 
-      await sleep(10_000);
+      if (stack) {
+        await botLogger.debug(stack, 'LOOP');
+      }
+
+      // Circuit breaker: if too many consecutive errors, exit
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        await botLogger.error(
+          `Circuit breaker triggered after ${consecutiveErrors} consecutive errors. Exiting.`,
+          'LOOP'
+        );
+
+        await publishSnapshot({
+          price: 0,
+          signal: 'HOLD',
+          signals: ['HOLD'],
+          position: 0,
+          entryPrice,
+          openBracket,
+          thresholds: { baseMin: 0, baseStep: 0, notionalMin: 0, tradable: 0 },
+          equity: 0,
+          drawdown: 0,
+          totalPnl: 0,
+          totalPnlPct: 0,
+          mark: 0,
+          balances: { quoteFree: 0, quoteTotal: 0, baseFree: 0, baseTotal: 0 },
+          lastTradeTs,
+          event: `circuit-breaker:${message}`,
+          runtimeCfg: getDefaultRuntimeConfig(),
+          candleTs: Date.now(),
+          candle: null,
+        });
+
+        throw new Error(`Trading loop stopped due to circuit breaker: ${message}`);
+      }
+
+      // Publish error snapshot
+      try {
+        await publishSnapshot({
+          price: 0,
+          signal: 'HOLD',
+          signals: ['HOLD'],
+          position: 0,
+          entryPrice,
+          openBracket,
+          thresholds: { baseMin: 0, baseStep: 0, notionalMin: 0, tradable: 0 },
+          equity: 0,
+          drawdown: 0,
+          totalPnl: 0,
+          totalPnlPct: 0,
+          mark: 0,
+          balances: { quoteFree: 0, quoteTotal: 0, baseFree: 0, baseTotal: 0 },
+          lastTradeTs,
+          event: `error:${message}`,
+          runtimeCfg: getDefaultRuntimeConfig(),
+          candleTs: Date.now(),
+          candle: null,
+        });
+      } catch (snapshotError) {
+        // Don't crash loop if snapshot fails
+        await botLogger.warn('Failed to publish error snapshot', 'LOOP');
+      }
+
+      // Exponential backoff with max limit
+      const maxBackoff = 60_000; // 1 minute max
+      errorBackoffMs = Math.min(errorBackoffMs * 2, maxBackoff);
+
+      await botLogger.info(`Retrying in ${errorBackoffMs / 1000}s...`, 'LOOP');
+      await sleep(errorBackoffMs);
     }
   }
 }
