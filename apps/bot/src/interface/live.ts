@@ -402,14 +402,21 @@ async function publishSnapshot(data: {
       : typeof candle?.ts === 'number'
         ? candle.ts
         : snapshot.timestamp;
+  const fallbackPrice = Number.isFinite(data.price) ? data.price : 0;
+  const open = candle && Number.isFinite(candle.open) ? candle.open : fallbackPrice;
+  const high = candle && Number.isFinite(candle.high) ? candle.high : fallbackPrice;
+  const low = candle && Number.isFinite(candle.low) ? candle.low : fallbackPrice;
+  const close = candle && Number.isFinite(candle.close) ? candle.close : fallbackPrice;
+  const volume = candle && Number.isFinite(candle.vol) && candle.vol >= 0 ? candle.vol : 0;
+
   await recordPriceTick({
     symbol: CFG.symbol,
     candleTs,
-    open: typeof candle?.open === 'number' ? candle.open : data.price,
-    high: typeof candle?.high === 'number' ? candle.high : data.price,
-    low: typeof candle?.low === 'number' ? candle.low : data.price,
-    close: typeof candle?.close === 'number' ? candle.close : data.price,
-    volume: typeof candle?.vol === 'number' ? candle.vol : 0,
+    open,
+    high,
+    low,
+    close,
+    volume,
     signal: data.signal,
     position: data.position,
     equity: data.equity,
@@ -442,14 +449,35 @@ async function loop() {
       runtimeCfg = resolveRuntimeCfg(overrides);
 
       const raw = await fetchOHLCV(exchange, 300); // 최신 OHLCV 캔들
-      const candles: Candle[] = raw.map((row) => ({
-        ts: Number(row[0]),
-        open: Number(row[1]),
-        high: Number(row[2]),
-        low: Number(row[3]),
-        close: Number(row[4]),
-        vol: Number(row[5]),
-      }));
+      const candles: Candle[] = [];
+      for (const row of raw) {
+        const ts = typeof row[0] === 'number' ? row[0] : Number(row[0]);
+        const open = typeof row[1] === 'number' ? row[1] : Number(row[1]);
+        const high = typeof row[2] === 'number' ? row[2] : Number(row[2]);
+        const low = typeof row[3] === 'number' ? row[3] : Number(row[3]);
+        const close = typeof row[4] === 'number' ? row[4] : Number(row[4]);
+        const vol = typeof row[5] === 'number' ? row[5] : Number(row[5] ?? 0);
+
+        if (
+          !Number.isFinite(ts) ||
+          !Number.isFinite(open) ||
+          !Number.isFinite(high) ||
+          !Number.isFinite(low) ||
+          !Number.isFinite(close) ||
+          !Number.isFinite(vol)
+        ) {
+          continue;
+        }
+
+        candles.push({
+          ts,
+          open,
+          high,
+          low,
+          close,
+          vol,
+        });
+      }
       const latestCandle = candles.at(-1) ?? null;
       if (!latestCandle) {
         await sleep(30_000);

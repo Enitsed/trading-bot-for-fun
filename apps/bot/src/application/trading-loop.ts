@@ -468,14 +468,36 @@ function sleep(ms: number): Promise<void> {
 }
 
 function mapCandles(raw: OHLCV[]): StrategyCandle[] {
-  return raw.map(([ts, open, high, low, close, volume]) => ({
-    ts: typeof ts === 'number' ? ts : Date.now(),
-    open: typeof open === 'number' ? open : 0,
-    high: typeof high === 'number' ? high : 0,
-    low: typeof low === 'number' ? low : 0,
-    close: typeof close === 'number' ? close : 0,
-    vol: typeof volume === 'number' ? volume : 0,
-  }));
+  const candles: StrategyCandle[] = [];
+  for (const [ts, open, high, low, close, volume] of raw) {
+    const tsNum = typeof ts === 'number' ? ts : Number(ts);
+    const openNum = typeof open === 'number' ? open : Number(open);
+    const highNum = typeof high === 'number' ? high : Number(high);
+    const lowNum = typeof low === 'number' ? low : Number(low);
+    const closeNum = typeof close === 'number' ? close : Number(close);
+    const volumeNum = typeof volume === 'number' ? volume : Number(volume);
+
+    if (
+      !Number.isFinite(tsNum) ||
+      !Number.isFinite(openNum) ||
+      !Number.isFinite(highNum) ||
+      !Number.isFinite(lowNum) ||
+      !Number.isFinite(closeNum) ||
+      !Number.isFinite(volumeNum)
+    ) {
+      continue;
+    }
+
+    candles.push({
+      ts: tsNum,
+      open: openNum,
+      high: highNum,
+      low: lowNum,
+      close: closeNum,
+      vol: volumeNum,
+    });
+  }
+  return candles;
 }
 
 function toSharedCandle(candle: StrategyCandle): SharedCandle {
