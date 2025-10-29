@@ -39,27 +39,66 @@ function pgEnabled(): boolean {
 }
 
 let syncPromise: Promise<void> | null = null;
+let isSyncing = false;
 
+/**
+ * Prepares database storage with atomic initialization to prevent race conditions
+ * @returns true if storage is ready, false otherwise
+ */
 export async function prepareStorage(): Promise<boolean> {
   if (!CFG.pgEnable) {
     return false;
   }
-  if (!syncPromise) {
+
+  // Return existing promise if already initialized
+  if (syncPromise) {
+    try {
+      await syncPromise;
+      return true;
+    } catch {
+      // Previous initialization failed, allow retry
+      syncPromise = null;
+    }
+  }
+
+  // Prevent race condition with atomic flag
+  if (isSyncing) {
+    // Wait for existing sync to complete
+    while (isSyncing) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    // Check result of sync that just completed
+    if (syncPromise) {
+      try {
+        await syncPromise;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  isSyncing = true;
+
+  try {
     syncPromise = (async () => {
       await ensureDbConnection();
       if (CFG.dbAutoSync) {
         await syncModels({ alter: true });
       }
     })();
-  }
-  try {
+
     await syncPromise;
+    console.log('[STORAGE] Storage prepared successfully');
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn('[DB] Storage initialization failed:', message);
+    console.warn('[STORAGE] Storage initialization failed:', message);
     syncPromise = null;
     return false;
+  } finally {
+    isSyncing = false;
   }
 }
 

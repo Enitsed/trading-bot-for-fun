@@ -40,6 +40,111 @@ function parseNumber(name: string, fallback: number, divideBy = 1): number {
   return fallback;
 }
 
+/**
+ * Validates a configuration value and throws if invalid
+ */
+function validateInRange(
+  value: number,
+  min: number,
+  max: number,
+  name: string,
+  inclusive = true
+): void {
+  const valid = inclusive
+    ? value >= min && value <= max
+    : value > min && value < max;
+
+  if (!valid) {
+    throw new Error(
+      `[CFG] ${name} must be ${inclusive ? '>=' : '>'} ${min} and ${inclusive ? '<=' : '<'} ${max}. Got: ${value}`
+    );
+  }
+}
+
+/**
+ * Validates configuration after parsing to ensure trading safety
+ */
+function validateConfig(cfg: typeof CFG): void {
+  // Validate exchange
+  const validExchanges = ['binance', 'upbit'];
+  if (!validExchanges.includes(cfg.exchange)) {
+    throw new Error(`[CFG] Invalid EXCHANGE: ${cfg.exchange}. Must be one of: ${validExchanges.join(', ')}`);
+  }
+
+  // Validate API credentials for live trading
+  if (!cfg.dryRun) {
+    if (!cfg.apiKey || cfg.apiKey.trim().length === 0) {
+      throw new Error('[CFG] API_KEY is required for live trading (dryRun=false)');
+    }
+    if (!cfg.apiSecret || cfg.apiSecret.trim().length === 0) {
+      throw new Error('[CFG] API_SECRET is required for live trading (dryRun=false)');
+    }
+    // Basic validation - keys should be reasonably long
+    if (cfg.apiKey.length < 8) {
+      throw new Error('[CFG] API_KEY appears too short to be valid');
+    }
+    if (cfg.apiSecret.length < 8) {
+      throw new Error('[CFG] API_SECRET appears too short to be valid');
+    }
+  }
+
+  // Validate risk parameters
+  validateInRange(cfg.riskPerTrade, 0, 1, 'RISK_PER_TRADE', false);
+  validateInRange(cfg.maxDailyLossPct, 0, 100, 'MAX_DAILY_LOSS_PCT', false);
+
+  // Validate RSI parameters
+  validateInRange(cfg.rsiLen, 2, 200, 'RSI_LEN');
+  validateInRange(cfg.rsiEntry, 0, 100, 'RSI_ENTRY');
+  validateInRange(cfg.rsiExit, 0, 100, 'RSI_EXIT');
+
+  if (cfg.rsiEntry >= cfg.rsiExit) {
+    throw new Error(
+      `[CFG] RSI_ENTRY (${cfg.rsiEntry}) must be less than RSI_EXIT (${cfg.rsiExit}) for LONG reversion strategy`
+    );
+  }
+
+  // Validate bracket parameters
+  validateInRange(cfg.stopPct, 0, 1, 'STOP_PCT', false);
+  validateInRange(cfg.takePct, 0, 1, 'TAKE_PCT', false);
+
+  if (cfg.stopPct >= cfg.takePct) {
+    throw new Error(
+      `[CFG] STOP_PCT (${cfg.stopPct}) should be less than TAKE_PCT (${cfg.takePct}) for positive risk/reward`
+    );
+  }
+
+  // Validate cooldown
+  if (cfg.cooldownMin < 0) {
+    throw new Error(`[CFG] COOLDOWN_MIN must be >= 0. Got: ${cfg.cooldownMin}`);
+  }
+
+  // Validate PostgreSQL port
+  if (cfg.pgEnable) {
+    validateInRange(cfg.pgPort, 1, 65535, 'PG_PORT');
+
+    if (!cfg.pgUrl && !cfg.pgHost) {
+      throw new Error('[CFG] Either PG_URL or PG_HOST must be set when PG_ENABLE=true');
+    }
+
+    if (!cfg.pgDatabase || cfg.pgDatabase.trim().length === 0) {
+      throw new Error('[CFG] PG_DATABASE must be set when PG_ENABLE=true');
+    }
+  }
+
+  // Validate symbol format
+  if (!cfg.symbol.includes('/')) {
+    throw new Error(`[CFG] SYMBOL must be in format BASE/QUOTE (e.g., BTC/USDT). Got: ${cfg.symbol}`);
+  }
+
+  // Validate timeframe format
+  const validTimeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d'];
+  if (!validTimeframes.includes(cfg.timeframe)) {
+    console.warn(
+      `[CFG] TIMEFRAME ${cfg.timeframe} may not be supported by all exchanges. Valid: ${validTimeframes.join(', ')}`
+    );
+  }
+}
+
 const runtimeDir = process.env.RUNTIME_DIR
   ? path.resolve(process.env.RUNTIME_DIR)
   : path.resolve(repoRoot, 'runtime');
@@ -74,9 +179,14 @@ export const CFG = {
   dbAutoSync: parseBoolean('DB_AUTO_SYNC', false),
 } as const;
 
-const requiredEnv = ['API_KEY', 'API_SECRET'];
-for (const key of requiredEnv) {
-  if (!process.env[key] && !CFG.dryRun) {
-    console.warn(`[CFG] ${key} is not set. Live trading may fail.`);
+// Validate the entire configuration
+try {
+  validateConfig(CFG);
+  console.log('[CFG] Configuration validated successfully');
+} catch (error) {
+  if (error instanceof Error) {
+    console.error(error.message);
+    process.exit(1);
   }
+  throw error;
 }

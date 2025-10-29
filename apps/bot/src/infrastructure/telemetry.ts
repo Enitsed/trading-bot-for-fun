@@ -1,7 +1,6 @@
 import type { Signal, Candle } from '@scalper/shared';
 import { botLogger, saveTelemetrySnapshot } from '@scalper/shared';
 import type { BalanceSnapshot } from './balance.js';
-import { CFG } from '@scalper/bot/infrastructure/config.js';
 
 export type Snapshot = {
   timestamp: number;
@@ -66,7 +65,10 @@ type PublishParams = {
 
 export async function publishSnapshot(params: PublishParams): Promise<void> {
   if (params.event.startsWith('error:')) {
-    await botLogger.warn(`Skipping telemetry snapshot due to error event: ${params.event}`, 'TELEMETRY');
+    await botLogger.warn(
+      `Skipping telemetry snapshot due to error event: ${params.event}`,
+      'TELEMETRY'
+    );
     return;
   }
 
@@ -100,7 +102,10 @@ export async function publishSnapshot(params: PublishParams): Promise<void> {
   ];
 
   if (numericFields.some((value) => !Number.isFinite(value))) {
-    await botLogger.warn('Skipping telemetry snapshot due to non-finite numeric values', 'TELEMETRY');
+    await botLogger.warn(
+      'Skipping telemetry snapshot due to non-finite numeric values',
+      'TELEMETRY'
+    );
     return;
   }
 

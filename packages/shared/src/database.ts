@@ -60,17 +60,98 @@ function createSequelizeInstance(config: DbConfig): Sequelize {
 }
 
 let initPromise: Promise<void> | null = null;
+let isInitializing = false;
 
-export async function ensureDbConnection(): Promise<void> {
-  if (!initPromise) {
-    initPromise = sequelize.authenticate();
+/**
+ * Ensures database connection is established with timeout and retry logic
+ * @param timeoutMs - Connection timeout in milliseconds (default: 10000)
+ * @param retries - Number of retry attempts (default: 3)
+ * @throws Error if connection fails after all retries
+ */
+export async function ensureDbConnection(
+  timeoutMs = 10000,
+  retries = 3
+): Promise<void> {
+  // Return existing promise if already initializing or initialized
+  if (initPromise) {
+    return initPromise;
   }
-  await initPromise;
+
+  // Prevent race condition with atomic flag
+  if (isInitializing) {
+    // Wait for existing initialization to complete
+    while (isInitializing) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (initPromise) {
+      return initPromise;
+    }
+  }
+
+  isInitializing = true;
+
+  const attemptConnection = async (): Promise<void> => {
+    return Promise.race([
+      sequelize.authenticate(),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error(`Database connection timeout after ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
+  };
+
+  const connectWithRetry = async (): Promise<void> => {
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        await attemptConnection();
+        return; // Success
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (attempt < retries) {
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.warn(
+            `[DB] Connection attempt ${attempt}/${retries} failed: ${lastError.message}. Retrying in ${backoffMs}ms...`
+          );
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+        }
+      }
+    }
+
+    throw new Error(
+      `Database connection failed after ${retries} attempts. Last error: ${lastError?.message}`
+    );
+  };
+
+  try {
+    initPromise = connectWithRetry();
+    await initPromise;
+    console.log('[DB] Connection established successfully');
+  } catch (error) {
+    initPromise = null;
+    throw error;
+  } finally {
+    isInitializing = false;
+  }
 }
 
+/**
+ * Synchronizes database models with error handling
+ * @param options - Sequelize sync options
+ * @throws Error if sync fails
+ */
 export async function syncModels(options?: { alter?: boolean }): Promise<void> {
-  await ensureDbConnection();
-  await sequelize.sync(options);
+  try {
+    await ensureDbConnection();
+
+    console.log(`[DB] Syncing models with options: ${JSON.stringify(options ?? {})}`);
+    await sequelize.sync(options);
+    console.log('[DB] Models synchronized successfully');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to sync database models: ${message}`);
+  }
 }
 
 export class PriceTickModel extends Model<InferAttributes<PriceTickModel>, InferCreationAttributes<PriceTickModel>> {
