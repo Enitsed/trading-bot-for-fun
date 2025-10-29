@@ -1,4 +1,4 @@
-import type { Exchange, OHLCV } from 'ccxt';
+import type { OHLCV } from 'ccxt';
 import { botLogger, type Candle as SharedCandle, type Signal, getRuntimeOverrides } from '@scalper/shared';
 import {
   connect,
@@ -304,24 +304,44 @@ export async function executeTradingLoop(): Promise<void> {
         }
       }
 
-      const priceTickPayload: PriceTickPayload = {
-        symbol: CFG.symbol,
-        candleTs: latestSharedCandle.timestamp,
-        open: latestSharedCandle.open,
-        high: latestSharedCandle.high,
-        low: latestSharedCandle.low,
-        close: latestSharedCandle.close,
-        volume: latestSharedCandle.volume,
-        signal: latestSignal,
-        position,
-        equity,
-        totalPnl,
-        totalPnlPct,
-        event,
-        runtimeCfg,
-      };
+      // Only record price tick if OHLC data is valid
+      // This prevents corrupted data from reaching the database
+      const hasValidOHLC =
+        Number.isFinite(latestSharedCandle.open) &&
+        Number.isFinite(latestSharedCandle.high) &&
+        Number.isFinite(latestSharedCandle.low) &&
+        Number.isFinite(latestSharedCandle.close) &&
+        latestSharedCandle.open > 0 &&
+        latestSharedCandle.high > 0 &&
+        latestSharedCandle.low > 0 &&
+        latestSharedCandle.close > 0 &&
+        latestSharedCandle.high >= latestSharedCandle.low;
 
-      await recordPriceTick(priceTickPayload);
+      if (hasValidOHLC) {
+        const priceTickPayload: PriceTickPayload = {
+          symbol: CFG.symbol,
+          candleTs: latestSharedCandle.timestamp,
+          open: latestSharedCandle.open,
+          high: latestSharedCandle.high,
+          low: latestSharedCandle.low,
+          close: latestSharedCandle.close,
+          volume: latestSharedCandle.volume,
+          signal: latestSignal,
+          position,
+          equity,
+          totalPnl,
+          totalPnlPct,
+          event,
+          runtimeCfg,
+        };
+
+        await recordPriceTick(priceTickPayload);
+      } else {
+        await botLogger.warn(
+          'Skipped recording price tick due to invalid OHLC data',
+          'LOOP'
+        );
+      }
 
       await publishSnapshot({
         price: latestPrice,

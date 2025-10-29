@@ -95,11 +95,22 @@ export async function prepareStorage(): Promise<boolean> {
   }
 }
 
+/**
+ * Records price tick to database with comprehensive OHLC validation
+ * Skips invalid data that would corrupt charts
+ */
 export async function recordPriceTick(payload: PriceTickPayload): Promise<void> {
   if (!pgEnabled()) return;
   if (!(await prepareStorage())) return;
 
+  // Validate timestamp
   const candleAtMs = Number(payload.candleTs);
+  if (!Number.isFinite(candleAtMs) || candleAtMs <= 0) {
+    console.warn('[DB] ⚠️  Skip price tick: Invalid timestamp', candleAtMs);
+    return;
+  }
+
+  // Validate OHLC prices (must be positive and finite)
   const priceFields = {
     open: payload.open,
     high: payload.high,
@@ -107,30 +118,57 @@ export async function recordPriceTick(payload: PriceTickPayload): Promise<void> 
     close: payload.close,
   } as const;
 
-  const hasInvalidPrice = Object.entries(priceFields).some(([key, value]) => {
+  for (const [key, value] of Object.entries(priceFields)) {
     if (!Number.isFinite(value) || value <= 0) {
-      console.warn(`[DB] Skip price tick: ${key} is invalid (${value})`);
-      return true;
+      console.warn(`[DB] ⚠️  Skip price tick: ${key}=${value} (invalid/zero price)`, {
+        symbol: payload.symbol,
+        timestamp: new Date(candleAtMs).toISOString(),
+        ohlc: priceFields,
+      });
+      return;
     }
-    return false;
-  });
-  if (hasInvalidPrice) return;
-
-  if (!Number.isFinite(candleAtMs) || candleAtMs <= 0) {
-    console.warn('[DB] Skip price tick: candle timestamp is invalid', candleAtMs);
-    return;
   }
 
+  // Validate OHLC relationships
   if (payload.high < payload.low) {
-    console.warn('[DB] Skip price tick: high is lower than low', {
+    console.warn('[DB] ⚠️  Skip price tick: high < low (corrupted candle)', {
+      symbol: payload.symbol,
       high: payload.high,
       low: payload.low,
+      timestamp: new Date(candleAtMs).toISOString(),
     });
     return;
   }
 
+  if (payload.open > payload.high || payload.open < payload.low) {
+    console.warn('[DB] ⚠️  Skip price tick: open outside [low, high] range', {
+      symbol: payload.symbol,
+      open: payload.open,
+      high: payload.high,
+      low: payload.low,
+      timestamp: new Date(candleAtMs).toISOString(),
+    });
+    return;
+  }
+
+  if (payload.close > payload.high || payload.close < payload.low) {
+    console.warn('[DB] ⚠️  Skip price tick: close outside [low, high] range', {
+      symbol: payload.symbol,
+      close: payload.close,
+      high: payload.high,
+      low: payload.low,
+      timestamp: new Date(candleAtMs).toISOString(),
+    });
+    return;
+  }
+
+  // Validate volume
   if (!Number.isFinite(payload.volume) || payload.volume < 0) {
-    console.warn('[DB] Skip price tick: volume is invalid', payload.volume);
+    console.warn('[DB] ⚠️  Skip price tick: Invalid volume', {
+      symbol: payload.symbol,
+      volume: payload.volume,
+      timestamp: new Date(candleAtMs).toISOString(),
+    });
     return;
   }
 
