@@ -24,6 +24,13 @@ import {
   getRuntimeOverrides,
   markCommandsProcessed,
   saveTelemetrySnapshot,
+  adjustAmountWithThreshold,
+  adjustSellAmount,
+  isOrderable,
+  CANDLE_LIMITS,
+  SLEEP_DURATIONS,
+  DEFAULT_FEE_RATE,
+  ERROR_HANDLING,
 } from '@scalper/shared';
 import type { TelemetrySnapshot, ManualActionType } from '@scalper/shared';
 import { calculateEquity, type BalanceSnapshot } from '@scalper/bot/infrastructure/balance.js';
@@ -206,10 +213,7 @@ async function handleCommand(
 
   if (command.type === 'manual-buy') {
     const desired = typeof command.amount === 'number' && command.amount > 0 ? command.amount : tradableThreshold;
-    let amount = Math.max(toAmountPrecision(exchange, desired), 0);
-    if (amount < tradableThreshold && desired >= tradableThreshold) {
-      amount = Math.max(toAmountPrecision(exchange, tradableThreshold), 0);
-    }
+    const amount = adjustAmountWithThreshold(toAmountPrecision, exchange, desired, tradableThreshold);
     const notional = amount * price;
     if (amount >= tradableThreshold && notional >= notionalMin) {
       const order = await placeMarket(exchange, 'buy', amount);
@@ -254,13 +258,7 @@ async function handleCommand(
     } else {
       const desired =
         typeof command.amount === 'number' && command.amount > 0 ? Math.min(command.amount, position) : position;
-      let amount = Math.max(toAmountPrecision(exchange, desired), 0);
-      if (amount < tradableThreshold && position >= tradableThreshold) {
-        amount = Math.max(toAmountPrecision(exchange, tradableThreshold), 0);
-      } else if (amount > position) {
-        amount = position;
-      }
-      amount = Math.max(toAmountPrecision(exchange, amount), 0);
+      const amount = adjustSellAmount(toAmountPrecision, exchange, desired, position, tradableThreshold);
       const notional = amount * price;
       if (amount > 0 && notional >= notionalMin) {
         const preTradePosition = position;
@@ -448,7 +446,7 @@ async function loop() {
       const overrides = await loadOverrides();
       runtimeCfg = resolveRuntimeCfg(overrides);
 
-      const raw = await fetchOHLCV(exchange, 300); // 최신 OHLCV 캔들
+      const raw = await fetchOHLCV(exchange, CANDLE_LIMITS.DEFAULT); // 최신 OHLCV 캔들
       const candles: Candle[] = [];
       for (const row of raw) {
         const ts = typeof row[0] === 'number' ? row[0] : Number(row[0]);
@@ -480,12 +478,12 @@ async function loop() {
       }
       const latestCandle = candles.at(-1) ?? null;
       if (!latestCandle) {
-        await sleep(30_000);
+        await sleep(SLEEP_DURATIONS.NO_CANDLE);
         continue;
       }
       const latestTs = latestCandle.ts; // 가장 최근 캔들 시간
       if (latestTs === lastBarTs) {
-        await sleep(30_000);
+        await sleep(SLEEP_DURATIONS.NO_CANDLE);
         continue;
       }
       lastBarTs = latestTs;
@@ -578,20 +576,14 @@ async function loop() {
           candleTs: latestTs,
           candle: latestCandle,
         });
-        await sleep(60_000);
+        await sleep(SLEEP_DURATIONS.LONG_WAIT);
         continue;
       }
 
       if (position > 0 && openBracket) {
         const hit = hitBracket(price, openBracket);
         if (hit) {
-          let amount = Math.max(toAmountPrecision(exchange, position), 0);
-          if (amount < tradableThreshold && position >= tradableThreshold) {
-            amount = Math.max(toAmountPrecision(exchange, tradableThreshold), 0);
-          } else if (amount > position) {
-            amount = position;
-          }
-          amount = Math.max(toAmountPrecision(exchange, amount), 0);
+          const amount = adjustSellAmount(toAmountPrecision, exchange, position, position, tradableThreshold);
           const notional = amount * price;
           if (amount >= tradableThreshold && notional >= notionalMin) {
             const previousBracket = openBracket;
@@ -648,7 +640,7 @@ async function loop() {
               candleTs: latestTs,
               candle: latestCandle,
             });
-            await sleep(5_000);
+            await sleep(SLEEP_DURATIONS.ON_ERROR);
             continue;
           }
           console.log(
@@ -673,7 +665,7 @@ async function loop() {
             candleTs: latestTs,
             candle: latestCandle,
           });
-          await sleep(5_000);
+          await sleep(SLEEP_DURATIONS.ON_ERROR);
           continue;
         }
       }
@@ -701,16 +693,13 @@ async function loop() {
             event,
             runtimeCfg,
           });
-          await sleep(5_000);
+          await sleep(SLEEP_DURATIONS.ON_ERROR);
           continue;
         }
         ({ equity, balances, mark } = await calculateEquity(exchange));
         const eqQuote = equity; // 최신 평가금액
         const rawQty = sizeByRisk(eqQuote, price, runtimeCfg.riskPerTrade); // 위험 비율 기반 수량
-        let amount = Math.max(toAmountPrecision(exchange, rawQty), 0); // 거래소 정밀도에 맞춘 수량
-        if (amount < tradableThreshold && rawQty >= tradableThreshold) {
-          amount = Math.max(toAmountPrecision(exchange, tradableThreshold), 0);
-        }
+        const amount = adjustAmountWithThreshold(toAmountPrecision, exchange, rawQty, tradableThreshold); // 거래소 정밀도에 맞춘 수량
         const notional = amount * price;
         console.log(
           `buying amount : ${amount}, price : ${price}, eqQuote : ${eqQuote}, rawQty : ${rawQty}, baseMin : ${baseMin}, minNotional : ${notionalMin}, notional : ${notional}`
@@ -903,7 +892,7 @@ async function loop() {
         });
       }
 
-      await sleep(30_000);
+      await sleep(SLEEP_DURATIONS.LOOP_INTERVAL);
     } catch (error) {
       console.dir(error);
       const message = error instanceof Error ? error.message : JSON.stringify(error);
@@ -926,7 +915,7 @@ async function loop() {
         candleTs: Date.now(),
         candle: null,
       });
-      await sleep(10_000);
+      await sleep(ERROR_HANDLING.INITIAL_BACKOFF_MS);
     }
   }
 }
