@@ -304,8 +304,8 @@ export async function executeTradingLoop(): Promise<void> {
         }
       }
 
-      // Only record price tick if OHLC data is valid
-      // This prevents corrupted data from reaching the database
+      // OHLC 데이터가 유효한 경우에만 price tick 기록
+      // 손상된 데이터가 데이터베이스에 도달하는 것을 방지
       const hasValidOHLC =
         Number.isFinite(latestSharedCandle.open) &&
         Number.isFinite(latestSharedCandle.high) &&

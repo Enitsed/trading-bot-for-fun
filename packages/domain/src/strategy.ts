@@ -2,29 +2,29 @@ import { rsi } from './indicators.js';
 import type { Candle, Signal, StrategyCfg } from './types.js';
 
 /**
- * Generate RSI reversion signals for a candle series.
+ * 캔들 시리즈에 대한 RSI 반전 시그널 생성
  *
- * Strategy logic:
- * - Issues LONG when RSI crosses back above the entry threshold after dipping below
- * - Issues EXIT when RSI is above the exit threshold while in position
- * - Issues HOLD in all other cases
+ * 전략 로직:
+ * - RSI가 진입 임계값 아래로 떨어졌다가 다시 위로 교차하면 LONG 발행
+ * - 포지션 보유 중 RSI가 청산 임계값 위에 있으면 EXIT 발행
+ * - 그 외 모든 경우 HOLD 발행
  *
- * @param candles - Array of OHLCV candles (must not be empty)
- * @param cfg - Strategy configuration with RSI parameters
- * @param cfg.rsiLen - RSI period length (must be >= 2)
- * @param cfg.entry - RSI entry threshold (must be 0-100, typically 20-40 for oversold)
- * @param cfg.exit - RSI exit threshold (must be 0-100, must be > entry)
- * @returns Array of signals corresponding to each candle
- * @throws Error if validation fails
+ * @param candles - OHLCV 캔들 배열 (비어있으면 안됨)
+ * @param cfg - RSI 파라미터를 포함한 전략 설정
+ * @param cfg.rsiLen - RSI 기간 길이 (반드시 >= 2)
+ * @param cfg.entry - RSI 진입 임계값 (0-100, 일반적으로 과매도 구간인 20-40)
+ * @param cfg.exit - RSI 청산 임계값 (0-100, 반드시 > entry)
+ * @returns 각 캔들에 대응하는 시그널 배열
+ * @throws 검증 실패 시 에러 발생
  *
- * Example:
+ * 예시:
  * - entry=30, exit=50
- * - RSI drops to 25 → wasBelow flag set
- * - RSI rises to 32 → LONG signal issued, wasBelow reset
- * - RSI rises to 55 → EXIT signal issued
+ * - RSI가 25로 하락 → wasBelow 플래그 설정
+ * - RSI가 32로 상승 → LONG 시그널 발행, wasBelow 리셋
+ * - RSI가 55로 상승 → EXIT 시그널 발행
  */
 export function rsiReversionSignals(candles: Candle[], cfg: StrategyCfg): Signal[] {
-  // Validate inputs
+  // 입력 검증
   if (!Array.isArray(candles) || candles.length === 0) {
     throw new Error('[STRATEGY] candles array must not be empty');
   }
@@ -47,7 +47,7 @@ export function rsiReversionSignals(candles: Candle[], cfg: StrategyCfg): Signal
     );
   }
 
-  // Validate candle data
+  // 캔들 데이터 검증
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
     if (!Number.isFinite(candle.close) || candle.close <= 0) {
@@ -55,7 +55,7 @@ export function rsiReversionSignals(candles: Candle[], cfg: StrategyCfg): Signal
     }
   }
 
-  // Calculate RSI
+  // RSI 계산
   const closes = candles.map((candle) => candle.close);
   const r = rsi(closes, cfg.rsiLen);
 
@@ -65,38 +65,38 @@ export function rsiReversionSignals(candles: Candle[], cfg: StrategyCfg): Signal
     );
   }
 
-  // Generate signals
+  // 시그널 생성
   const out: Signal[] = [];
-  let wasBelow = false; // State machine: tracks if RSI dipped below entry threshold
+  let wasBelow = false; // 상태 머신: RSI가 진입 임계값 아래로 떨어졌는지 추적
 
   for (let i = 0; i < candles.length; i++) {
     const rv = r[i];
 
-    // Handle NaN RSI (not enough data for calculation)
+    // NaN RSI 처리 (계산에 충분한 데이터가 없음)
     if (!Number.isFinite(rv)) {
       out.push('HOLD');
       continue;
     }
 
-    // Check if RSI dropped below entry threshold
+    // RSI가 진입 임계값 아래로 떨어졌는지 확인
     if (rv < cfg.entry) {
       wasBelow = true;
     }
 
-    // Check for LONG signal: RSI crossed back above entry after being below
+    // LONG 시그널 확인: RSI가 아래에 있다가 진입 임계값 위로 교차
     if (wasBelow && rv >= cfg.entry) {
       out.push('LONG');
-      wasBelow = false; // Reset state machine
+      wasBelow = false; // 상태 머신 리셋
       continue;
     }
 
-    // Check for EXIT signal: RSI above exit threshold
+    // EXIT 시그널 확인: RSI가 청산 임계값 위에 있음
     if (rv >= cfg.exit) {
       out.push('EXIT');
       continue;
     }
 
-    // Default: no signal
+    // 기본값: 시그널 없음
     out.push('HOLD');
   }
 

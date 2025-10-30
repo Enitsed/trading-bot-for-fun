@@ -41,7 +41,7 @@ function parseNumber(name: string, fallback: number, divideBy = 1): number {
 }
 
 /**
- * Validates a configuration value and throws if invalid
+ * 설정 값의 유효 범위를 검증하고 유효하지 않으면 에러를 발생시킴
  */
 function validateInRange(
   value: number,
@@ -62,16 +62,16 @@ function validateInRange(
 }
 
 /**
- * Validates configuration after parsing to ensure trading safety
+ * 파싱된 설정값을 검증하여 거래 안정성을 보장
  */
 function validateConfig(cfg: typeof CFG): void {
-  // Validate exchange
+  // 거래소 검증
   const validExchanges = ['binance', 'upbit'];
   if (!validExchanges.includes(cfg.exchange)) {
     throw new Error(`[CFG] Invalid EXCHANGE: ${cfg.exchange}. Must be one of: ${validExchanges.join(', ')}`);
   }
 
-  // Validate API credentials for live trading
+  // 실거래 시 API 자격증명 검증
   if (!cfg.dryRun) {
     if (!cfg.apiKey || cfg.apiKey.trim().length === 0) {
       throw new Error('[CFG] API_KEY is required for live trading (dryRun=false)');
@@ -79,7 +79,7 @@ function validateConfig(cfg: typeof CFG): void {
     if (!cfg.apiSecret || cfg.apiSecret.trim().length === 0) {
       throw new Error('[CFG] API_SECRET is required for live trading (dryRun=false)');
     }
-    // Basic validation - keys should be reasonably long
+    // 기본 검증 - 키는 충분히 길어야 함
     if (cfg.apiKey.length < 8) {
       throw new Error('[CFG] API_KEY appears too short to be valid');
     }
@@ -88,11 +88,11 @@ function validateConfig(cfg: typeof CFG): void {
     }
   }
 
-  // Validate risk parameters
+  // 리스크 파라미터 검증
   validateInRange(cfg.riskPerTrade, 0, 1, 'RISK_PER_TRADE', false);
   validateInRange(cfg.maxDailyLossPct, 0, 100, 'MAX_DAILY_LOSS_PCT', false);
 
-  // Validate RSI parameters
+  // RSI 파라미터 검증
   validateInRange(cfg.rsiLen, 2, 200, 'RSI_LEN');
   validateInRange(cfg.rsiEntry, 0, 100, 'RSI_ENTRY');
   validateInRange(cfg.rsiExit, 0, 100, 'RSI_EXIT');
@@ -103,7 +103,7 @@ function validateConfig(cfg: typeof CFG): void {
     );
   }
 
-  // Validate bracket parameters
+  // 브래킷 파라미터 검증
   validateInRange(cfg.stopPct, 0, 1, 'STOP_PCT', false);
   validateInRange(cfg.takePct, 0, 1, 'TAKE_PCT', false);
 
@@ -113,12 +113,12 @@ function validateConfig(cfg: typeof CFG): void {
     );
   }
 
-  // Validate cooldown
+  // 쿨다운 검증
   if (cfg.cooldownMin < 0) {
     throw new Error(`[CFG] COOLDOWN_MIN must be >= 0. Got: ${cfg.cooldownMin}`);
   }
 
-  // Validate PostgreSQL port
+  // PostgreSQL 포트 검증
   if (cfg.pgEnable) {
     validateInRange(cfg.pgPort, 1, 65535, 'PG_PORT');
 
@@ -131,12 +131,12 @@ function validateConfig(cfg: typeof CFG): void {
     }
   }
 
-  // Validate symbol format
+  // 심볼 형식 검증
   if (!cfg.symbol.includes('/')) {
     throw new Error(`[CFG] SYMBOL must be in format BASE/QUOTE (e.g., BTC/USDT). Got: ${cfg.symbol}`);
   }
 
-  // Validate timeframe format
+  // 타임프레임 형식 검증
   const validTimeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d'];
   if (!validTimeframes.includes(cfg.timeframe)) {
     console.warn(
@@ -179,7 +179,7 @@ export const CFG = {
   dbAutoSync: parseBoolean('DB_AUTO_SYNC', false),
 } as const;
 
-// Validate the entire configuration
+// 전체 설정 검증
 try {
   validateConfig(CFG);
   console.log('[CFG] Configuration validated successfully');

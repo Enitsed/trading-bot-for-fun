@@ -42,8 +42,8 @@ let syncPromise: Promise<void> | null = null;
 let isSyncing = false;
 
 /**
- * Prepares database storage with atomic initialization to prevent race conditions
- * @returns true if storage is ready, false otherwise
+ * 경쟁 조건을 방지하기 위한 원자적 초기화로 데이터베이스 스토리지 준비
+ * @returns 스토리지가 준비되면 true, 그 외 false
  */
 export async function prepareStorage(): Promise<boolean> {
   if (!CFG.pgEnable) {
@@ -96,21 +96,21 @@ export async function prepareStorage(): Promise<boolean> {
 }
 
 /**
- * Records price tick to database with comprehensive OHLC validation
- * Skips invalid data that would corrupt charts
+ * 포괄적인 OHLC 검증을 통해 price tick을 데이터베이스에 기록
+ * 차트를 손상시킬 수 있는 유효하지 않은 데이터는 스킵함
  */
 export async function recordPriceTick(payload: PriceTickPayload): Promise<void> {
   if (!pgEnabled()) return;
   if (!(await prepareStorage())) return;
 
-  // Validate timestamp
+  // 타임스탬프 검증
   const candleAtMs = Number(payload.candleTs);
   if (!Number.isFinite(candleAtMs) || candleAtMs <= 0) {
     console.warn('[DB] ⚠️  Skip price tick: Invalid timestamp', candleAtMs);
     return;
   }
 
-  // Validate OHLC prices (must be positive and finite)
+  // OHLC 가격 검증 (양수이고 유한해야 함)
   const priceFields = {
     open: payload.open,
     high: payload.high,
@@ -129,7 +129,7 @@ export async function recordPriceTick(payload: PriceTickPayload): Promise<void> 
     }
   }
 
-  // Validate OHLC relationships
+  // OHLC 관계 검증
   if (payload.high < payload.low) {
     console.warn('[DB] ⚠️  Skip price tick: high < low (corrupted candle)', {
       symbol: payload.symbol,
@@ -162,7 +162,7 @@ export async function recordPriceTick(payload: PriceTickPayload): Promise<void> 
     return;
   }
 
-  // Validate volume
+  // 거래량 검증
   if (!Number.isFinite(payload.volume) || payload.volume < 0) {
     console.warn('[DB] ⚠️  Skip price tick: Invalid volume', {
       symbol: payload.symbol,
