@@ -24,11 +24,20 @@
       }
     ],
     "paths": {
-      "@scalper/domain": ["../../packages/domain/src"],
-      "@scalper/domain/*": ["../../packages/domain/src/*"],
-      "@scalper/shared": ["../../packages/shared/src"],
-      "@scalper/shared/*": ["../../packages/shared/src/*"]
-    }
+      "@scalper/domain": [
+        "../../packages/domain/src"
+      ],
+      "@scalper/domain/*": [
+        "../../packages/domain/src/*"
+      ],
+      "@scalper/shared": [
+        "../../packages/shared/src"
+      ],
+      "@scalper/shared/*": [
+        "../../packages/shared/src/*"
+      ]
+    },
+    "strictNullChecks": true
   },
   "include": [
     "next-env.d.ts",
