@@ -35,6 +35,21 @@ const TIMEFRAME_OPTIONS: TimeframeOption[] = [
 
 const DEFAULT_TIMEFRAME: HistoryTimeframe = '1h';
 
+type QuickRangeOption = {
+  label: string;
+  hours: number;
+};
+
+const QUICK_RANGE_OPTIONS: QuickRangeOption[] = [
+  { label: '1시간', hours: 1 },
+  { label: '6시간', hours: 6 },
+  { label: '12시간', hours: 12 },
+  { label: '24시간', hours: 24 },
+  { label: '3일', hours: 72 },
+  { label: '1주일', hours: 168 },
+  { label: '1개월', hours: 720 },
+];
+
 type SnapshotStatus = 'loading' | 'ready' | 'error' | 'empty';
 type HistoryStatus = 'loading' | 'ready' | 'error';
 
@@ -118,6 +133,7 @@ export default function DashboardPage(): JSX.Element {
     hasNext: boolean;
   } | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [customHours, setCustomHours] = useState<string>('');
 
   const fetchSnapshot = async (): Promise<void> => {
     try {
@@ -152,7 +168,11 @@ export default function DashboardPage(): JSX.Element {
       try {
         setHistoryStatus((prev) => (prev === 'ready' ? prev : 'loading'));
         const option = TIMEFRAME_OPTIONS.find((item) => item.key === historyTf);
-        const hoursParam = option?.hours ?? TIMEFRAME_OPTIONS[0].hours;
+        // 커스텀 시간이 설정되어 있으면 그것을 사용, 아니면 기본값
+        const customHoursNum = Number(customHours);
+        const hoursParam = Number.isFinite(customHoursNum) && customHoursNum > 0
+          ? customHoursNum
+          : (option?.hours ?? TIMEFRAME_OPTIONS[0].hours);
         const params = new URLSearchParams({ hours: String(hoursParam), tf: historyTf });
         if (historyCursor.start !== null) params.set('start', String(historyCursor.start));
         if (historyCursor.end !== null) params.set('end', String(historyCursor.end));
@@ -198,7 +218,7 @@ export default function DashboardPage(): JSX.Element {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [historyTf, historyCursor]);
+  }, [historyTf, historyCursor, customHours]);
 
   useEffect(() => {
     const bootstrapSettings = async (): Promise<void> => {
@@ -310,6 +330,28 @@ export default function DashboardPage(): JSX.Element {
     setHistoryTf(tf);
     setHistoryCursor({ start: null, end: null });
     setHistoryWindow(null);
+  };
+
+  const handleQuickRange = (hours: number) => {
+    // 현재 타임프레임에 맞는 hours로 설정
+    const option = TIMEFRAME_OPTIONS.find((item) => item.key === historyTf);
+    if (option) {
+      // 타임프레임의 hours를 업데이트하는 대신 커스텀 범위로 전환
+      setHistoryCursor({ start: null, end: null });
+      setHistoryWindow(null);
+      // API 파라미터를 직접 변경하도록 설정 (임시로 customHours 사용)
+      setCustomHours(String(hours));
+    }
+  };
+
+  const handleCustomHoursSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const hours = Number(customHours);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      alert('올바른 시간을 입력하세요.');
+      return;
+    }
+    handleQuickRange(hours);
   };
 
   const deriveRangeMs = () => {
@@ -503,17 +545,53 @@ export default function DashboardPage(): JSX.Element {
 
   const renderCharts = (): JSX.Element => (
     <>
-      <div className="timeframe-toggle">
-        {TIMEFRAME_OPTIONS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            className={key === historyTf ? 'active' : ''}
-            onClick={() => handleTimeframeSelect(key)}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="chart-controls">
+        <div className="timeframe-section">
+          <h4>캔들 간격</h4>
+          <div className="timeframe-toggle">
+            {TIMEFRAME_OPTIONS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                className={key === historyTf ? 'active' : ''}
+                onClick={() => handleTimeframeSelect(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="range-section">
+          <h4>시간 범위 빠른 선택</h4>
+          <div className="quick-range-buttons">
+            {QUICK_RANGE_OPTIONS.map(({ label, hours }) => (
+              <button
+                key={hours}
+                type="button"
+                className="range-button"
+                onClick={() => handleQuickRange(hours)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="custom-range-section">
+          <h4>커스텀 시간 범위</h4>
+          <form className="custom-range-form" onSubmit={handleCustomHoursSubmit}>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={customHours}
+              onChange={(e) => setCustomHours(e.target.value)}
+              placeholder="시간 입력 (예: 48)"
+            />
+            <button type="submit">적용</button>
+          </form>
+        </div>
       </div>
 
       {historyWindow && (
@@ -521,13 +599,13 @@ export default function DashboardPage(): JSX.Element {
           <span className="range-label">{historyRangeLabel}</span>
           <div className="range-actions">
             <button type="button" onClick={handlePrevRange} disabled={!historyWindow.hasPrev}>
-              이전 기간
+              ◀ 이전
             </button>
             <button type="button" onClick={handleResetRange} disabled={viewingLatest}>
-              최근 보기
+              최신으로
             </button>
             <button type="button" onClick={handleNextRange} disabled={!historyWindow.hasNext}>
-              다음 기간
+              다음 ▶
             </button>
           </div>
         </div>

@@ -240,6 +240,30 @@ header .meta {
   gap: 32px;
 }
 
+/* 차트 컨트롤 전체 레이아웃 */
+.chart-controls {
+  background: rgba(16, 22, 38, 0.75);
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 24px;
+  display: grid;
+  gap: 24px;
+}
+
+.chart-controls h4 {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  color: #8fa2d9;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* 타임프레임 섹션 */
+.timeframe-section {
+  border-bottom: 1px solid rgba(148, 163, 230, 0.15);
+  padding-bottom: 20px;
+}
+
 .timeframe-toggle {
   display: flex;
   gap: 8px;
@@ -257,10 +281,103 @@ header .meta {
   transition: background 0.2s ease, border-color 0.2s ease;
 }
 
+.timeframe-toggle button:hover {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
 .timeframe-toggle button.active {
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.4), rgba(59, 130, 246, 0.4));
   border-color: rgba(59, 130, 246, 0.6);
   color: #f5f7fb;
+}
+
+/* 빠른 범위 선택 섹션 */
+.range-section {
+  border-bottom: 1px solid rgba(148, 163, 230, 0.15);
+  padding-bottom: 20px;
+}
+
+.quick-range-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.range-button {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: #6ee7b7;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.range-button:hover {
+  background: rgba(16, 185, 129, 0.3);
+  border-color: rgba(16, 185, 129, 0.5);
+  transform: translateY(-1px);
+}
+
+/* 커스텀 범위 섹션 */
+.custom-range-section {
+  padding-bottom: 0;
+}
+
+.custom-range-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.custom-range-form input {
+  flex: 1;
+  max-width: 200px;
+  background: rgba(24, 32, 52, 0.7);
+  border: 1px solid rgba(148, 163, 230, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #f5f7fb;
+  font-size: 0.9rem;
+}
+
+.custom-range-form input:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.custom-range-form button {
+  background: rgba(147, 51, 234, 0.3);
+  border: 1px solid rgba(147, 51, 234, 0.5);
+  border-radius: 8px;
+  padding: 8px 16px;
+  color: #e9d5ff;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.custom-range-form button:hover {
+  background: rgba(147, 51, 234, 0.5);
+  border-color: rgba(147, 51, 234, 0.7);
+}
+
+@media (max-width: 768px) {
+  .chart-controls {
+    padding: 16px;
+  }
+
+  .custom-range-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .custom-range-form input {
+    max-width: 100%;
+  }
 }
 
 .range-meta {
