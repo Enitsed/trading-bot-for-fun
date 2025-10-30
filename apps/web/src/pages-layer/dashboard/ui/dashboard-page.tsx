@@ -84,6 +84,7 @@ export function DashboardPage(): JSX.Element {
               onResetRange={history.handleResetRange}
               onCustomHoursChange={history.handleCustomHoursChange}
               onCustomHoursSubmit={history.handleCustomHoursSubmit}
+              onRetryFetch={history.fetchHistory}
             />
           )}
           {activeTab === 'controls' && (

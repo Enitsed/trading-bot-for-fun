@@ -11,6 +11,7 @@ import {
 } from '../../../shared/config/dashboard';
 import type { QuickRangeOption } from '../../../shared/config/dashboard';
 import { formatTimestamp } from '../../../shared/lib/format';
+import { fetchJsonWithRetry } from '../../../shared/lib/fetch-with-retry';
 
 export type HistoryStatus = 'loading' | 'ready' | 'error';
 
@@ -55,11 +56,10 @@ export function useHistoryState(params: UseHistoryStateParams = {}) {
       if (historyCursor.start !== null) params.set('start', String(historyCursor.start));
       if (historyCursor.end !== null) params.set('end', String(historyCursor.end));
 
-      const res = await fetch(`/api/history?${params.toString()}`, { cache: 'no-store' });
-      if (!res.ok) {
-        throw new Error(`요청 실패: ${res.status}`);
-      }
-      const body = (await res.json()) as HistoryApiResponse;
+      const body = await fetchJsonWithRetry<HistoryApiResponse>(`/api/history?${params.toString()}`, {
+        cache: 'no-store',
+      });
+
       if (!body?.ok) {
         throw new Error(body?.error || '데이터를 불러오지 못했습니다.');
       }

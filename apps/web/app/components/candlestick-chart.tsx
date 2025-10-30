@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { HistoryCandle } from '@scalper/shared';
 
 const WIDTH = 800;
@@ -58,6 +58,8 @@ type ChartDataset = {
 };
 
 export function CandlestickChart({ candles, emptyLabel = '표시할 데이터가 없습니다.' }: CandlestickChartProps): JSX.Element {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
   const dataset = useMemo<ChartDataset | null>(() => {
     if (!candles || candles.length === 0) {
       return null;
@@ -120,8 +122,10 @@ export function CandlestickChart({ candles, emptyLabel = '표시할 데이터가
     return <p className="chart-empty">{emptyLabel}</p>;
   }
 
+  const hoveredCandle = hoveredIndex !== null ? candles[hoveredIndex] : null;
+
   return (
-    <div className="chart-wrapper">
+    <div className="chart-wrapper" style={{ position: 'relative' }}>
       <svg className="chart-svg" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Hourly candlestick chart">
         {dataset.yTicks.map((tick, idx) => (
           <g key={`y-${idx}`} transform={`translate(0, ${tick.y})`}>
@@ -133,7 +137,12 @@ export function CandlestickChart({ candles, emptyLabel = '표시할 데이터가
         ))}
 
         {dataset.renders.map((candle, idx) => (
-          <g key={`candle-${idx}`}>
+          <g
+            key={`candle-${idx}`}
+            onMouseEnter={() => setHoveredIndex(idx)}
+            onMouseLeave={() => setHoveredIndex(null)}
+            style={{ cursor: 'pointer' }}
+          >
             <line
               x1={candle.x}
               x2={candle.x}
@@ -148,6 +157,7 @@ export function CandlestickChart({ candles, emptyLabel = '표시할 데이터가
               height={candle.bodyHeight}
               rx={2}
               className={candle.isBullish ? 'candle-body bullish' : 'candle-body bearish'}
+              opacity={hoveredIndex === null || hoveredIndex === idx ? 1 : 0.4}
             />
           </g>
         ))}
@@ -161,6 +171,39 @@ export function CandlestickChart({ candles, emptyLabel = '표시할 데이터가
           </g>
         ))}
       </svg>
+      {hoveredCandle && (
+        <div
+          className="chart-tooltip"
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(148, 163, 230, 0.3)',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            fontSize: '0.85rem',
+            pointerEvents: 'none',
+            zIndex: 10,
+          }}
+        >
+          <div style={{ marginBottom: '6px', color: '#93c5fd', fontWeight: 600 }}>
+            {formatHourLabel(hoveredCandle.timestamp)}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', color: '#cbd5f5' }}>
+            <span style={{ color: '#9aa3b5' }}>시가:</span>
+            <span>{formatPriceLabel(hoveredCandle.open)}</span>
+            <span style={{ color: '#9aa3b5' }}>고가:</span>
+            <span style={{ color: '#4ade80' }}>{formatPriceLabel(hoveredCandle.high)}</span>
+            <span style={{ color: '#9aa3b5' }}>저가:</span>
+            <span style={{ color: '#f87171' }}>{formatPriceLabel(hoveredCandle.low)}</span>
+            <span style={{ color: '#9aa3b5' }}>종가:</span>
+            <span>{formatPriceLabel(hoveredCandle.close)}</span>
+            <span style={{ color: '#9aa3b5' }}>거래량:</span>
+            <span>{formatPriceLabel(hoveredCandle.volume)}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -28,6 +28,7 @@ type DashboardChartsProps = {
   onResetRange: () => void;
   onCustomHoursChange: (value: string) => void;
   onCustomHoursSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onRetryFetch?: () => void;
 };
 
 export function DashboardCharts(props: DashboardChartsProps): JSX.Element {
@@ -51,6 +52,7 @@ export function DashboardCharts(props: DashboardChartsProps): JSX.Element {
     onResetRange,
     onCustomHoursChange,
     onCustomHoursSubmit,
+    onRetryFetch,
   } = props;
 
   const historyRangeHours = activeTimeframe.hours;
@@ -126,7 +128,14 @@ export function DashboardCharts(props: DashboardChartsProps): JSX.Element {
 
       {historyStatus === 'loading' && <p className="notice">차트를 준비하는 중입니다…</p>}
       {historyStatus === 'error' && (
-        <p className="notice error">차트를 불러오지 못했습니다: {historyError ?? '알 수 없는 오류'}</p>
+        <div className="error-panel">
+          <p className="notice error">차트를 불러오지 못했습니다: {historyError ?? '알 수 없는 오류'}</p>
+          {onRetryFetch && (
+            <button type="button" onClick={onRetryFetch} className="retry-button">
+              다시 시도
+            </button>
+          )}
+        </div>
       )}
 
       {historyStatus === 'ready' && (

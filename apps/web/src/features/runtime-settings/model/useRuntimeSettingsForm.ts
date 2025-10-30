@@ -2,6 +2,7 @@
 // FSD: 전략 설정 변경은 사용자 상호작용이므로 feature layer로 분리해 페이지에서 조합만 담당하게 합니다.
 
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { toast } from 'sonner';
 import type {
   RuntimeCfg,
   RuntimeOverrideKey,
@@ -73,11 +74,11 @@ export function useRuntimeSettingsForm(params: UseRuntimeSettingsFormParams = {}
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      setStatus('저장 중…');
-      try {
+
+      const saveSettings = async () => {
         const payload = buildSettingsPayload(form);
         if (!payload) {
-          setStatus('변경 사항이 없습니다.');
+          toast.info('변경 사항이 없습니다.');
           setDirty(false);
           return;
         }
@@ -90,13 +91,17 @@ export function useRuntimeSettingsForm(params: UseRuntimeSettingsFormParams = {}
           const body = await res.json().catch(() => ({}));
           throw new Error(body?.error || '요청 실패');
         }
-        setStatus('전략 설정이 저장되었습니다. (다음 루프에서 적용)');
         setDirty(false);
-      } catch (err) {
-        console.error(err);
-        const message = err instanceof Error ? err.message : String(err);
-        setStatus(`저장 실패: ${message}`);
-      }
+      };
+
+      toast.promise(saveSettings(), {
+        loading: '전략 설정 저장 중...',
+        success: '전략 설정이 저장되었습니다. (다음 루프에서 적용)',
+        error: (err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          return `저장 실패: ${message}`;
+        },
+      });
     },
     [form]
   );

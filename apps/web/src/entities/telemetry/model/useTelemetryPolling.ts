@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { TelemetrySnapshot } from '@scalper/shared';
+import { fetchJsonWithRetry } from '../../../shared/lib/fetch-with-retry';
 
 export type SnapshotStatus = 'loading' | 'ready' | 'error' | 'empty';
 
@@ -24,11 +25,9 @@ export function useTelemetryPolling(params: UseTelemetryPollingParams = {}) {
 
   const fetchSnapshot = useCallback(async () => {
     try {
-      const res = await fetch('/api/telemetry', { cache: 'no-store' });
-      if (!res.ok) {
-        throw new Error(`요청 실패: ${res.status}`);
-      }
-      const body = (await res.json()) as TelemetryResponse;
+      const body = await fetchJsonWithRetry<TelemetryResponse>('/api/telemetry', {
+        cache: 'no-store',
+      });
       if (!body?.data) {
         setSnapshot(null);
         setStatus('empty');
