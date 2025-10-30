@@ -97,6 +97,7 @@ export function DashboardPage(): JSX.Element {
               onSettingsSubmit={settings.handleSubmit}
               manualAmount={manual.amount}
               manualStatus={manual.status}
+              manualHistory={manual.history}
               onManualAmountChange={manual.handleAmountChange}
               onManualAction={manual.submit}
             />

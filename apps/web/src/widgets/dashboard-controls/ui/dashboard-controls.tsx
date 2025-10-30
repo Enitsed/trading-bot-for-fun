@@ -5,6 +5,8 @@ import type { ChangeEvent, FormEvent } from 'react';
 import type { RuntimeCfg, RuntimeOverrideKey } from '@scalper/shared';
 import type { SettingsFormState } from '../../../features/runtime-settings';
 import type { ManualActionType } from '@scalper/shared';
+import type { ActionHistoryEntry } from '../../../shared/lib/action-history';
+import { formatActionType, formatRelativeTime } from '../../../shared/lib/action-history';
 
 type DashboardControlsProps = {
   runtimeCfg?: RuntimeCfg;
@@ -15,6 +17,7 @@ type DashboardControlsProps = {
   onSettingsSubmit: (event: FormEvent<HTMLFormElement>) => void;
   manualAmount: string;
   manualStatus: string | null;
+  manualHistory: ActionHistoryEntry[];
   onManualAmountChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onManualAction: (type: ManualActionType) => void;
 };
@@ -29,6 +32,7 @@ export function DashboardControls(props: DashboardControlsProps): JSX.Element {
     onSettingsSubmit,
     manualAmount,
     manualStatus,
+    manualHistory,
     onManualAmountChange,
     onManualAction,
   } = props;
@@ -160,6 +164,27 @@ export function DashboardControls(props: DashboardControlsProps): JSX.Element {
           </div>
         </div>
         {manualStatus && <p className="note status">{manualStatus}</p>}
+
+        {/* 액션 히스토리 */}
+        {manualHistory.length > 0 && (
+          <div className="action-history">
+            <h4>최근 액션 기록</h4>
+            <div className="history-list">
+              {manualHistory.map((entry) => (
+                <div key={entry.id} className={`history-item ${entry.status}`}>
+                  <div className="history-header">
+                    <span className="history-type">{formatActionType(entry.type)}</span>
+                    {entry.amount !== undefined && (
+                      <span className="history-amount">{entry.amount.toFixed(6)}</span>
+                    )}
+                    <span className="history-time">{formatRelativeTime(entry.timestamp)}</span>
+                  </div>
+                  {entry.message && <div className="history-message">{entry.message}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
     </>
   );
