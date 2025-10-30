@@ -3,19 +3,36 @@ import { v4 as uuidv4 } from 'uuid';
 import { CFG } from '@scalper/bot/infrastructure/config.js';
 
 /**
+ * Binance 거래소 확장 인터페이스 (샌드박스 모드 지원)
+ */
+interface WithSandboxMode {
+  setSandboxMode: (enable: boolean) => void;
+}
+
+/**
+ * 타입 가드: setSandboxMode를 지원하는 거래소 확인
+ */
+function hasSandboxMode(exchange: Exchange): exchange is Exchange & WithSandboxMode {
+  return 'setSandboxMode' in exchange && typeof (exchange as WithSandboxMode).setSandboxMode === 'function';
+}
+
+/**
  * Creates exchange instance and loads market metadata
  * @returns Connected exchange instance
  * @throws Error if exchange is unsupported, connection fails, or markets can't be loaded
  */
 export async function connect(): Promise<Exchange> {
-  const klass = (ccxt as Record<string, any>)[CFG.exchange];
-  if (!klass) {
+  // CCXT 동적 클래스 접근
+  // Note: CCXT 라이브러리 구조상 타입 단언 필요
+  const ExchangeClass = (ccxt as unknown as Record<string, new (config: unknown) => Exchange>)[CFG.exchange];
+
+  if (!ExchangeClass) {
     throw new Error(`[EXCHANGE] Unsupported exchange: ${CFG.exchange}`);
   }
 
   let exchange: Exchange;
   try {
-    exchange = new klass({
+    exchange = new ExchangeClass({
       apiKey: CFG.apiKey,
       secret: CFG.apiSecret,
       enableRateLimit: true,
@@ -26,9 +43,10 @@ export async function connect(): Promise<Exchange> {
     throw new Error(`[EXCHANGE] Failed to initialize exchange: ${message}`);
   }
 
-  if (CFG.exchange === 'binance' && 'setSandboxMode' in exchange) {
+  // Binance 샌드박스 모드 설정
+  if (CFG.exchange === 'binance' && hasSandboxMode(exchange)) {
     try {
-      (exchange as any).setSandboxMode?.(CFG.useSandbox);
+      exchange.setSandboxMode(CFG.useSandbox);
       console.log(`[EXCHANGE] Binance sandbox mode: ${CFG.useSandbox}`);
     } catch (error) {
       console.warn('[EXCHANGE] Failed to set sandbox mode:', error);
@@ -174,39 +192,126 @@ export async function getPositionQty(exchange: Exchange): Promise<number> {
   return 0;
 }
 
-// 거래소의 최소 주문 수량과 스텝을 계산
+/**
+ * 거래소별 거래 제약 조건 타입
+ */
+type MarketInfo = {
+  filters?: Array<{
+    filterType?: string;
+    stepSize?: string | number;
+    minNotional?: string | number;
+    notional?: string | number;
+    minValue?: string | number;
+    minQty?: string | number;
+  }>;
+};
+
+type MarketWithInfo = {
+  info?: MarketInfo;
+  limits?: {
+    amount?: { min?: number };
+    cost?: { min?: number };
+    quote?: { min?: number };
+  };
+  precision?: { amount?: number };
+};
+
+/**
+ * 거래소의 최소 주문 수량과 스텝을 계산
+ */
 export async function quotePrecision(
   exchange: Exchange
 ): Promise<{ baseMin: number; baseStep: number; notionalMin: number }> {
-  const market = exchange.market(CFG.symbol);
-  const lot = (market?.limits?.amount?.min ?? 0.00001) as number; // 최소 주문 수량
-  const precision = typeof market?.precision?.amount === 'number' ? market.precision.amount : undefined;
-  const filters = Array.isArray((market as any)?.info?.filters) ? (market as any).info.filters : [];
-  const lotSize = filters?.find?.((f: any) => f?.filterType === 'LOT_SIZE');
-  const stepFromFilter = lotSize?.stepSize !== undefined ? Number(lotSize.stepSize) : undefined;
-  const step =
-    (typeof stepFromFilter === 'number' && !Number.isNaN(stepFromFilter) && stepFromFilter > 0
-      ? stepFromFilter
-      : precision !== undefined
-        ? Math.pow(10, -precision)
-        : undefined) ?? 0.00001; // 수량 스텝
-  const notionalFilter = filters?.find?.((f: any) => f?.filterType === 'MIN_NOTIONAL' || f?.filterType === 'NOTIONAL');
-  const notionalFromFilter =
-    notionalFilter?.minNotional ?? notionalFilter?.notional ?? notionalFilter?.minValue ?? notionalFilter?.minQty;
-  const limitsAny = market?.limits as Record<string, any> | undefined;
-  const costLimitMin = limitsAny?.cost?.min;
-  const quoteLimitMin = limitsAny?.quote?.min;
-  const notionalMinCandidate =
-    typeof notionalFromFilter === 'string' ? Number(notionalFromFilter) : notionalFromFilter;
-  const notionalMin =
-    (typeof notionalMinCandidate === 'number' && !Number.isNaN(notionalMinCandidate) && notionalMinCandidate > 0
-      ? notionalMinCandidate
-      : typeof costLimitMin === 'number' && costLimitMin > 0
-        ? costLimitMin
-        : typeof quoteLimitMin === 'number' && quoteLimitMin > 0
-          ? quoteLimitMin
-        : 0) as number;
-  return { baseMin: lot, baseStep: step, notionalMin };
+  const market = exchange.market(CFG.symbol) as MarketWithInfo | undefined;
+
+  // 1. 최소 주문 수량 (baseMin)
+  const minOrderQuantity = market?.limits?.amount?.min ?? 0.00001;
+
+  // 2. 수량 스텝 (baseStep) - LOT_SIZE 필터 우선, 없으면 precision 사용
+  const quantityStep = extractQuantityStep(market);
+
+  // 3. 최소 주문 금액 (notionalMin) - 필터 우선, 없으면 limits 사용
+  const minNotional = extractMinNotional(market);
+
+  return {
+    baseMin: minOrderQuantity,
+    baseStep: quantityStep,
+    notionalMin: minNotional,
+  };
+}
+
+/**
+ * LOT_SIZE 필터 또는 precision에서 수량 스텝 추출
+ */
+function extractQuantityStep(market: MarketWithInfo | undefined): number {
+  const DEFAULT_STEP = 0.00001;
+
+  if (!market) {
+    return DEFAULT_STEP;
+  }
+
+  // LOT_SIZE 필터에서 stepSize 추출 시도
+  const filters = market.info?.filters ?? [];
+  const lotSizeFilter = filters.find((f) => f.filterType === 'LOT_SIZE');
+
+  if (lotSizeFilter?.stepSize !== undefined) {
+    const stepSize = Number(lotSizeFilter.stepSize);
+    if (Number.isFinite(stepSize) && stepSize > 0) {
+      return stepSize;
+    }
+  }
+
+  // precision에서 계산 시도
+  const precision = market.precision?.amount;
+  if (typeof precision === 'number') {
+    return Math.pow(10, -precision);
+  }
+
+  return DEFAULT_STEP;
+}
+
+/**
+ * MIN_NOTIONAL 필터 또는 limits에서 최소 주문 금액 추출
+ */
+function extractMinNotional(market: MarketWithInfo | undefined): number {
+  if (!market) {
+    return 0;
+  }
+
+  // 1. MIN_NOTIONAL 또는 NOTIONAL 필터에서 추출 시도
+  const filters = market.info?.filters ?? [];
+  const notionalFilter = filters.find(
+    (f) => f.filterType === 'MIN_NOTIONAL' || f.filterType === 'NOTIONAL'
+  );
+
+  if (notionalFilter) {
+    const value =
+      notionalFilter.minNotional ??
+      notionalFilter.notional ??
+      notionalFilter.minValue ??
+      notionalFilter.minQty;
+
+    if (value !== undefined) {
+      const numeric = typeof value === 'string' ? Number(value) : value;
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric;
+      }
+    }
+  }
+
+  // 2. limits.cost.min 확인
+  const costMin = market.limits?.cost?.min;
+  if (typeof costMin === 'number' && costMin > 0) {
+    return costMin;
+  }
+
+  // 3. limits.quote.min 확인
+  const quoteMin = market.limits?.quote?.min;
+  if (typeof quoteMin === 'number' && quoteMin > 0) {
+    return quoteMin;
+  }
+
+  return 0;
 }
 
 // 거래소 정밀도에 맞춰 수량을 절삭

@@ -38,61 +38,55 @@ function pgEnabled(): boolean {
   return CFG.pgEnable;
 }
 
-let syncPromise: Promise<void> | null = null;
-let isSyncing = false;
+/**
+ * 초기화 상태 관리
+ * - null: 초기화 안됨
+ * - Promise: 초기화 진행 중 또는 완료
+ */
+let initPromise: Promise<boolean> | null = null;
 
 /**
  * 경쟁 조건을 방지하기 위한 원자적 초기화로 데이터베이스 스토리지 준비
+ *
  * @returns 스토리지가 준비되면 true, 그 외 false
+ *
+ * 동작:
+ * - 첫 번째 호출: 초기화 Promise 생성 및 실행
+ * - 동시 호출: 동일한 Promise를 재사용하여 중복 초기화 방지
+ * - 실패 후 재호출: 새로운 초기화 시도
  */
 export async function prepareStorage(): Promise<boolean> {
   if (!CFG.pgEnable) {
     return false;
   }
 
-  // Return existing promise if already initialized
-  if (syncPromise) {
+  // 이미 초기화 중이거나 완료된 경우, 동일한 Promise 재사용
+  if (initPromise) {
+    return initPromise;
+  }
+
+  // 새로운 초기화 시작
+  initPromise = (async (): Promise<boolean> => {
     try {
-      await syncPromise;
-      return true;
-    } catch {
-      // Previous initialization failed, allow retry
-      syncPromise = null;
-    }
-  }
-
-  // Prevent race condition with atomic flag
-  if (isSyncing) {
-    // Wait for existing sync to complete
-    while (isSyncing) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    // Sync completed - check if it succeeded
-    // If syncPromise is still set, it succeeded. If null, it failed.
-    return syncPromise !== null;
-  }
-
-  isSyncing = true;
-
-  try {
-    syncPromise = (async () => {
       await ensureDbConnection();
+
       if (CFG.dbAutoSync) {
         await syncModels({ alter: true });
       }
-    })();
 
-    await syncPromise;
-    console.log('[STORAGE] Storage prepared successfully');
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn('[STORAGE] Storage initialization failed:', message);
-    syncPromise = null;
-    return false;
-  } finally {
-    isSyncing = false;
-  }
+      console.log('[STORAGE] Storage prepared successfully');
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[STORAGE] Storage initialization failed:', message);
+
+      // 초기화 실패 시 null로 재설정하여 재시도 허용
+      initPromise = null;
+      return false;
+    }
+  })();
+
+  return initPromise;
 }
 
 /**
