@@ -1,6 +1,7 @@
 import ccxt, { type Exchange, type OHLCV, type Order } from 'ccxt';
 import { v4 as uuidv4 } from 'uuid';
 import { CFG } from '@scalper/bot/infrastructure/config.js';
+import { FLOATING_POINT_EPSILON } from '@scalper/shared';
 
 /**
  * Binance 거래소 확장 인터페이스 (샌드박스 모드 지원)
@@ -217,6 +218,24 @@ type MarketWithInfo = {
 };
 
 /**
+ * Validate precision parameters
+ * @throws Error if any parameter is invalid
+ */
+function validatePrecisionValues(baseMin: number, baseStep: number, notionalMin: number): void {
+  if (!Number.isFinite(baseMin) || baseMin <= 0) {
+    throw new Error(`[EXCHANGE] Invalid baseMin: ${baseMin}. Must be a positive finite number.`);
+  }
+
+  if (!Number.isFinite(baseStep) || baseStep < 0) {
+    throw new Error(`[EXCHANGE] Invalid baseStep: ${baseStep}. Must be a non-negative finite number.`);
+  }
+
+  if (!Number.isFinite(notionalMin) || notionalMin < 0) {
+    throw new Error(`[EXCHANGE] Invalid notionalMin: ${notionalMin}. Must be a non-negative finite number.`);
+  }
+}
+
+/**
  * 거래소의 최소 주문 수량과 스텝을 계산
  */
 export async function quotePrecision(
@@ -232,6 +251,9 @@ export async function quotePrecision(
 
   // 3. 최소 주문 금액 (notionalMin) - 필터 우선, 없으면 limits 사용
   const minNotional = extractMinNotional(market);
+
+  // Validate extracted values
+  validatePrecisionValues(minOrderQuantity, quantityStep, minNotional);
 
   return {
     baseMin: minOrderQuantity,
@@ -317,7 +339,7 @@ function extractMinNotional(market: MarketWithInfo | undefined): number {
 // 거래소 정밀도에 맞춰 수량을 절삭
 export function roundStep(amount: number, step: number): number {
   if (step <= 0) return amount;
-  const scaled = Math.floor(amount / step + 1e-12) * step;
+  const scaled = Math.floor(amount / step + FLOATING_POINT_EPSILON) * step;
   return Number.isFinite(scaled) ? scaled : 0;
 }
 

@@ -10,6 +10,8 @@ export * from './validators/ohlc-validator.js';
 
 // Utils
 export * from './utils/amount-precision.js';
+export * from './utils/candle-parser.js';
+export * from './utils/threshold-calculator.js';
 
 // Constants
 export * from './constants/trading.js';

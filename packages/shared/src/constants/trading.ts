@@ -7,6 +7,12 @@
 export const DEFAULT_FEE_RATE = 0.0006; // 0.06%
 
 /**
+ * 부동소수점 연산 정밀도 엡실론
+ * 수량 계산 시 반올림 오류를 방지하기 위한 허용 오차
+ */
+export const FLOATING_POINT_EPSILON = 1e-12;
+
+/**
  * 캔들 데이터 관련 상수
  */
 export const CANDLE_LIMITS = {
